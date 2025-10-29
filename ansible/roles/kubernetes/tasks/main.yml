@@ -52,7 +52,7 @@
 
 - name: Initialize Kubernetes Control Plane (Master Node)
   ansible.builtin.shell: |
-    # Using 192.168.0.0/16 because it's the default for the Calico CNI
+    # FIX: Removed the in-line comment that caused the YAML parsing error.
     kubeadm init --pod-network-cidr=192.168.0.0/16
   when: inventory_hostname in groups['kubernetes_master']
   args:
