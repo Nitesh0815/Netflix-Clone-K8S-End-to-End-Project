@@ -97,9 +97,9 @@ jobs:
           cd ../ansible
           ls -l # Debug: verify ec2_ips.json exists and inventory_generator.py is present
 
-          # Execute the Python script (ansible/inventory_generator.py) to read the array output
-          # and create the inventory.ini file with the correct IP-to-group mapping.
-          python3 inventory_generator.py ec2_ips.json inventory.ini
+          # Execute the Python script (ansible/scripts/inventory_generator.py)
+          # *** THIS IS THE CORRECTED LINE ***
+          python3 scripts/inventory_generator.py ec2_ips.json inventory.ini 
 
           echo "✅ Inventory file created:"
           cat inventory.ini
