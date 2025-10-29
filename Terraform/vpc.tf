@@ -79,29 +79,110 @@ resource "aws_route_table_association" "public_rta" {
 }
 
 # -------------------------------
-# Default Security Group
+# 1. Security Group for Jenkins Server (Index 0)
 # -------------------------------
-resource "aws_security_group" "default_ec2_sg" {
-  name        = "${local.org}-${local.project}-${local.env}-sg"
-  description = "Default EC2 Security Group"
+resource "aws_security_group" "jenkins_sg" {
+  name        = "${local.org}-${local.project}-${local.env}-jenkins-sg"
+  description = "Security Group for Jenkins Server (SSH/8080)"
   vpc_id      = aws_vpc.vpc.id
 
+  # Allow SSH from anywhere (0.0.0.0/0 is common for public instances, but VPC CIDR is better)
   ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"] # Allow all inbound traffic (for demo)
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    # BEST PRACTICE: Replace "0.0.0.0/0" with your office/VPN IP range for production
+    cidr_blocks = ["0.0.0.0/0"] 
   }
 
+  # Allow Jenkins UI access
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  # Allow all outbound traffic (default)
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"] # Allow all outbound traffic
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# -------------------------------
+# 2. Security Group for Monitoring Server (Index 1)
+# -------------------------------
+resource "aws_security_group" "monitoring_sg" {
+  name        = "${local.org}-${local.project}-${local.env}-monitoring-sg"
+  description = "Security Group for Monitoring (SSH/Prometheus/Grafana)"
+  vpc_id      = aws_vpc.vpc.id
+
+  # Allow SSH
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${local.org}-${local.project}-${local.env}-sg"
-    Env  = local.env
+  # Allow Grafana UI
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow Prometheus UI
+  ingress {
+    from_port   = 9090
+    to_port     = 9090
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  # Allow all outbound traffic (default)
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# -------------------------------
+# 3. Security Group for Kubernetes Nodes (Index 2, 3)
+# -------------------------------
+resource "aws_security_group" "kubernetes_sg" {
+  name        = "${local.org}-${local.project}-${local.env}-k8s-sg"
+  description = "Security Group for Kubernetes Nodes (SSH/API/Kubelet)"
+  vpc_id      = aws_vpc.vpc.id
+
+  # Allow SSH
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow K8s API Server (Control Plane access)
+  ingress {
+  from_port   = 6443
+  to_port     = 6443
+  protocol    = "tcp"
+  # Allow traffic only from the Jenkins SG
+  security_groups = [aws_security_group.jenkins_sg.id] 
+}
+  
+  # Allow all outbound traffic (default)
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }

@@ -21,7 +21,8 @@ env:
   # Secrets for AWS Provider
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  # CRITICAL ADDITION: Pass AWS Key Pair name to Terraform via TF_VAR
+  # Pass Key Pair Name to Terraform using TF_VAR_ prefix
+  # This matches your Terraform variable 'ssh_key_name'
   TF_VAR_ssh_key_name: ${{ secrets.AWS_KEY_PAIR_NAME }}
 
 permissions:
@@ -79,65 +80,36 @@ jobs:
       - name: Run Ansible Playbook
         if: ${{ github.event.inputs.action == 'apply' }}
         run: |
-          echo "🟢 Installing Ansible and jq..."
+          echo "🟢 Installing Ansible, jq, and Python dependencies..."
           sudo apt update -y
-          sudo apt install -y ansible python3 jq
+          # Install dependencies required for Ansible and the Python script
+          sudo apt install -y ansible python3 jq python3-pip
+          pip3 install --user jinja2
 
-          # 2. FIX: We stay in the 'Terraform' directory to run 'terraform output'
+          # The job starts in the 'Terraform' directory.
+          
           echo "📦 Collecting Terraform Outputs..."
-          # Output is written one directory up into the 'ansible' folder
+          # Write output to the repo's ansible folder, one level up
           terraform output -json > ../ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
-          cd ../ansible # Move to repo_root/ansible to run the playbook
+          # Change directory to the Ansible folder
+          cd ../ansible
+          ls -l # Debug: verify ec2_ips.json exists and inventory_generator.py is present
 
-          ls -l # Debug: verify ec2_ips.json exists
-
-          # === DEBUGGING ADDITIONS START HERE ===
-          echo "DEBUG: Raw contents of ec2_ips.json:"
-          cat ec2_ips.json
-          echo "======================================"
-
-          # Extract IPs from Terraform JSON output
-          JENKINS_IP=$(jq -r '.jenkins_server_ip.value' ec2_ips.json)
-          MONITORING_IP=$(jq -r '.monitoring_server_ip.value' ec2_ips.json)
-          MASTER_IP=$(jq -r '.k8s_master_ip.value' ec2_ips.json)
-
-          echo "DEBUG: Extracted JENKINS_IP: $JENKINS_IP"
-          echo "DEBUG: Extracted MONITORING_IP: $MONITORING_IP"
-          echo "DEBUG: Extracted MASTER_IP: $MASTER_IP"
-          echo "======================================"
-          # === DEBUGGING ADDITIONS END HERE ===
-
-          # Create a hosts file using printf to avoid YAML parser errors
-          echo "" > inventory.ini # Clear the file
-          printf "[jenkins]\n" >> inventory.ini
-          # Check for null values and handle them gracefully (though they should be valid IPs)
-          if [ -z "$JENKINS_IP" ] || [ "$JENKINS_IP" == "null" ]; then
-            echo "Error: Jenkins IP is missing or null."
-            exit 1
-          fi
-          printf "%s ansible_user=ec2-user\n\n" "$JENKINS_IP" >> inventory.ini
-          
-          printf "[monitoring]\n" >> inventory.ini
-          printf "%s ansible_user=ec2-user\n\n" "$MONITORING_IP" >> inventory.ini
-          
-          printf "[kubernetes_master]\n" >> inventory.ini
-          printf "%s ansible_user=ec2-user\n\n" "$MASTER_IP" >> inventory.ini
-          
-          printf "[all:vars]\n" >> inventory.ini
-          printf "ansible_ssh_common_args='-o StrictHostKeyChecking=no'\n" >> inventory.ini
+          # Execute the Python script (ansible/inventory_generator.py) to read the array output
+          # and create the inventory.ini file with the correct IP-to-group mapping.
+          python3 inventory_generator.py ec2_ips.json inventory.ini
 
           echo "✅ Inventory file created:"
           cat inventory.ini
           
-          # Optional: Add a brief pause to allow EC2 instances to fully initialize SSH
           echo "😴 Waiting 60 seconds for EC2 instances to become fully reachable..."
           sleep 60
           
           echo "🚀 Running Ansible Playbook with wait_for_connection..."
-          # Ensure the instance is up and ready for SSH before running the main playbook.
-          ansible all -i inventory.ini -m wait_for_connection -a "delay=5 timeout=300"
+          # Use -u ubuntu for the connection user, as configured in the Python script.
+          ansible all -i inventory.ini -u ubuntu -m wait_for_connection -a "delay=5 timeout=300"
           
           echo "✅ SSH Connection Established. Running site.yml..."
-          ansible-playbook -i inventory.ini site.yml
+          ansible-playbook -i inventory.ini -u ubuntu site.yml

@@ -1,31 +1,43 @@
+# ansible/roles/tasks/kubernetes/main.yml (NEW)
 - name: Install dependencies
-  apt:
+  ansible.builtin.apt:
     name:
       - apt-transport-https
       - ca-certificates
       - curl
+      # Also add 'gnupg' to handle key conversion
+      - gnupg 
     state: present
     update_cache: yes
 
-- name: Add Kubernetes apt repo
-  shell: |
-    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
-    echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+- name: Download Kubernetes GPG key and convert to keyring format
+  ansible.builtin.shell: 
+    # Use gpg --dearmor to convert the key to the modern binary keyring format
+    cmd: curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+    creates: /etc/apt/keyrings/kubernetes-archive-keyring.gpg
   args:
-    creates: /etc/apt/sources.list.d/kubernetes.list
+    warn: false # Suppress warning about using shell
+
+- name: Add Kubernetes apt repo with signed-by
+  ansible.builtin.apt_repository:
+    repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main'
+    state: present
+    filename: kubernetes
+    update_cache: yes
 
 - name: Install kubeadm, kubelet, kubectl
-  apt:
+  ansible.builtin.apt:
     name:
       - kubelet
       - kubeadm
       - kubectl
     state: present
-    update_cache: yes
 
 - name: Disable swap (required for Kubernetes)
-  command: swapoff -a
+  ansible.builtin.command: swapoff -a
 
 - name: Initialize Kubernetes master
-  shell: kubeadm init
+  ansible.builtin.shell: kubeadm init
   when: inventory_hostname in groups['kubernetes_master']
+  args:
+    creates: /etc/kubernetes/admin.conf

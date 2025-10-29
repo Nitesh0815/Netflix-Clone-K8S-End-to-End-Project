@@ -5,7 +5,19 @@ resource "aws_instance" "ec2" {
   instance_type          = var.ec2_instance_type[count.index]
   key_name               = var.ssh_key_name
   iam_instance_profile   = aws_iam_instance_profile.iam_instance_profile.name
-  vpc_security_group_ids = [aws_security_group.default_ec2_sg.id]
+  
+  # CRITICAL: Dynamically select the Security Group based on instance index
+  vpc_security_group_ids = [
+    element(
+      [
+        aws_security_group.jenkins_sg.id,       # Index 0: jenkins-server
+        aws_security_group.monitoring_sg.id,    # Index 1: monitoring-server
+        aws_security_group.kubernetes_sg.id,    # Index 2: kubernetes-master-node
+        aws_security_group.kubernetes_sg.id,    # Index 3: kubernetes-worker-node
+      ],
+      count.index
+    )
+  ]
 
   root_block_device {
     volume_size = var.ec2_volume_size
@@ -15,5 +27,7 @@ resource "aws_instance" "ec2" {
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-${local.instance_names[count.index]}"
     Env  = local.env
+    # ADDED TAG: Useful for dynamic inventory
+    Role = split("-", local.instance_names[count.index])[0] 
   }
 }
