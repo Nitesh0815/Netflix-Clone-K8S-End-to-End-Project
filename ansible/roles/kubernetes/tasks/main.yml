@@ -84,8 +84,9 @@
 
 # NEW: Fetch the join command from the Master Node
 - name: Get kubeadm join command and register it
-  # We use the '--ttl 0' flag to create a non-expiring token for this automated run
+  # FIX: Ensure root privileges for kubeadm token command.
   ansible.builtin.command: kubeadm token create --print-join-command --ttl 0
+  become: yes # Added for explicit root access, as kubeadm requires it.
   register: kubeadm_join_command
   # FIX: Delegate to the master, and let the delegate mechanism handle the execution context.
   delegate_to: "{{ groups['kubernetes_master'][0] }}" 
