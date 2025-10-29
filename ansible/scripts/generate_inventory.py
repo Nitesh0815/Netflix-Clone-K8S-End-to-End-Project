@@ -1,24 +1,20 @@
-import json
-import sys
+import json, sys
 
-if len(sys.argv) != 3:
-    print("Usage: python3 generate_inventory.py <terraform_output_json> <inventory_file>")
+infile, outfile = sys.argv[1], sys.argv[2]
+data = json.load(open(infile))
+
+# Works for either a dict with "value" or a plain list
+if isinstance(data, dict) and "value" in data:
+    ips = data["value"]
+elif isinstance(data, list):
+    ips = data
+else:
+    print("Unexpected JSON format:", type(data), data)
     sys.exit(1)
 
-# Read Terraform JSON output
-with open(sys.argv[1]) as f:
-    data = json.load(f)
+with open(outfile, "w") as f:
+    f.write("[web]\n")
+    for ip in ips:
+        f.write(f"{ip} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa\n")
 
-# Adjust if your Terraform output is wrapped inside 'ec2_public_ips'
-if "ec2_public_ips" in data:
-    ips = data["ec2_public_ips"]["value"]
-else:
-    ips = data["value"]
-
-# Write Ansible inventory
-with open(sys.argv[2], "w") as f:
-    f.write(f"[jenkins]\n{ips[0]}\n\n")
-    f.write(f"[monitoring]\n{ips[1]}\n\n")
-    f.write(f"[kubernetes_master]\n{ips[2]}\n\n")
-    f.write(f"[kubernetes_worker]\n{ips[3]}\n\n")
-    f.write("[all:vars]\nansible_user=ubuntu\nansible_ssh_private_key_file=~/.ssh/id_rsa\n")
+print(f"Inventory file written to {outfile}")
