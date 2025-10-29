@@ -77,6 +77,8 @@
 
   tasks:
     - name: Get join command from master
+      # 💥 FIX APPLIED HERE: Force the delegated task to run with sudo
+      become: yes 
       ansible.builtin.shell: kubeadm token create --print-join-command
       delegate_to: "{{ groups['kubernetes_master'][0] }}"
       run_once: true
