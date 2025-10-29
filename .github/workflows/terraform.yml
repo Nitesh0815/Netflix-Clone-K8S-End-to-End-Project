@@ -14,15 +14,16 @@ on:
         default: 'plan'
 
 env:
-  # Secrets for Terraform Cloud Backend
+  # Terraform Cloud backend credentials
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
   TF_WORKSPACE: ${{ secrets.TF_WORKSPACE }}
   TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
-  # Secrets for AWS Provider
+
+  # AWS credentials
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  # Pass Key Pair Name to Terraform using TF_VAR_ prefix
-  # This matches your Terraform variable 'ssh_key_name'
+
+  # SSH Key name (for EC2 provisioning)
   TF_VAR_ssh_key_name: ${{ secrets.AWS_KEY_PAIR_NAME }}
 
 permissions:
@@ -36,22 +37,29 @@ jobs:
     defaults:
       run:
         shell: bash
-        # Assuming your Terraform files are in a subdirectory named 'Terraform'
-        working-directory: Terraform
+        working-directory: Terraform # 👈 Make sure your Terraform code is in this folder
 
     steps:
+      # ------------------------------------------------------------
+      # STEP 1: CHECKOUT CODE
+      # ------------------------------------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v5
 
+      # ------------------------------------------------------------
+      # STEP 2: SETUP TERRAFORM
+      # ------------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          # Using the requested version 1.7.5
-          terraform_version: "1.7.5" 
+          terraform_version: "1.7.5"
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
+      # ------------------------------------------------------------
+      # STEP 3: TERRAFORM COMMANDS
+      # ------------------------------------------------------------
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: Terraform Validate
         run: terraform validate
@@ -62,60 +70,78 @@ jobs:
 
       - name: Terraform Apply
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -input=false
 
       - name: Terraform Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
-        run: terraform destroy -auto-approve
+        run: terraform destroy -auto-approve -input=false
 
-      # 🔑 CRITICAL: Set up SSH Key for Ansible Connectivity
+      # ------------------------------------------------------------
+      # STEP 4: SETUP SSH AGENT (FOR ANSIBLE)
+      # ------------------------------------------------------------
       - name: Setup SSH Agent
         if: ${{ github.event.inputs.action == 'apply' }}
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          # This secret MUST contain the private key used to launch the EC2 instances
           ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
 
-      # 🔧 Run Ansible after Terraform Apply
-      - name: Run Ansible Playbook
+      # ------------------------------------------------------------
+      # STEP 5: INSTALL ANSIBLE + DEPENDENCIES
+      # ------------------------------------------------------------
+      - name: Install Ansible & Dependencies
         if: ${{ github.event.inputs.action == 'apply' }}
         run: |
-          echo "🟢 Installing Ansible, jq, and Python dependencies..."
+          echo "🟢 Installing Ansible, jq, Python3, pip..."
           sudo apt update -y
-          # Install dependencies required for Ansible and the Python script
           sudo apt install -y ansible python3 jq python3-pip
           pip3 install --user jinja2
 
-          # The job starts in the 'Terraform' directory.
-          
-          echo "📦 Collecting Terraform Outputs..."
-          # Write output to the repo's ansible folder, one level up
+      # ------------------------------------------------------------
+      # STEP 6: COLLECT TERRAFORM OUTPUTS
+      # ------------------------------------------------------------
+      - name: Export Terraform Outputs to Ansible
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          echo "📦 Exporting Terraform outputs to ansible/ec2_ips.json"
           terraform output -json > ../ansible/ec2_ips.json
 
-          echo "⚙️ Generating Dynamic Inventory..."
-          # Change directory to the Ansible folder
+      # ------------------------------------------------------------
+      # STEP 7: GENERATE DYNAMIC INVENTORY FOR ANSIBLE
+      # ------------------------------------------------------------
+      - name: Generate Dynamic Inventory
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          echo "⚙️ Generating Ansible inventory from Terraform outputs..."
           cd ../ansible
           
-          # 🐛 DEBUG CHANGE: List contents of the 'scripts' directory to confirm the file exists
-          echo "Listing contents of 'scripts/' directory:"
-          ls -l scripts/ 
+          echo "🔍 Checking scripts directory:"
+          ls -l scripts/
 
-          # Execute the Python script (ansible/scripts/inventory_generator.py)
-          # FIX: Changed 'inventory_generator.py' to 'generate_inventory.py'
-          python3 scripts/generate_inventory.py ec2_ips.json inventory.ini 
+          python3 scripts/generate_inventory.py ec2_ips.json inventory.ini
 
-          echo "✅ Inventory file created:"
+          echo "✅ Generated inventory.ini:"
           cat inventory.ini
-          
-          echo "😴 Waiting 60 seconds for EC2 instances to become fully reachable..."
+
+      # ------------------------------------------------------------
+      # STEP 8: WAIT FOR EC2 TO BECOME REACHABLE
+      # ------------------------------------------------------------
+      - name: Wait for EC2 SSH Availability
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          echo "⏳ Waiting 60 seconds for instances to boot..."
           sleep 60
           
-          # FIX: Export the environment variable to disable Host Key Checking for Ansible
           export ANSIBLE_HOST_KEY_CHECKING=False
-          
-          echo "🚀 Running Ansible Playbook with wait_for_connection..."
-          # Use -u ubuntu for the connection user, as configured in the Python script.
+          cd ../ansible
+          echo "🚀 Checking SSH connection to all nodes..."
           ansible all -i inventory.ini -u ubuntu -m wait_for_connection -a "delay=5 timeout=300"
-          
-          echo "✅ SSH Connection Established. Running site.yml..."
+
+      # ------------------------------------------------------------
+      # STEP 9: RUN ANSIBLE PLAYBOOK
+      # ------------------------------------------------------------
+      - name: Run Ansible Playbook
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          echo "✅ Running Ansible Playbook..."
+          cd ../ansible
           ansible-playbook -i inventory.ini -u ubuntu site.yml

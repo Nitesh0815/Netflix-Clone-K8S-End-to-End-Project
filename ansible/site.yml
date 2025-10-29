@@ -1,37 +1,99 @@
-# ansible/site.yml - Main Playbook
+# ansible/site.yml
 ---
+# =======================
+# 1️⃣ Jenkins Server Setup
+# =======================
 - name: Configure Jenkins Server
   hosts: jenkins_server
   become: yes
+  gather_facts: yes
   roles:
-    - { role: jenkins } # Assuming the role is named 'jenkins'
+    - { role: jenkins }
 
+# ==========================
+# 2️⃣ Monitoring Server Setup
+# ==========================
 - name: Configure Monitoring Server
   hosts: monitoring_server
   become: yes
+  gather_facts: yes
   roles:
-    - { role: monitoring } # Assuming you have a 'monitoring' role
+    - { role: monitoring }
 
-- name: Configure Kubernetes Nodes
-  hosts: kubernetes_nodes
+# =================================
+# 3️⃣ Kubernetes Master Configuration
+# =================================
+- name: Initialize Kubernetes Master Node
+  hosts: kubernetes_master
   become: yes
+  gather_facts: yes
   roles:
-    - { role: kubernetes } # Assuming the role is named 'kubernetes'
+    - { role: kubernetes }
 
-# Separate task to handle joining nodes after master is initialized
+  tasks:
+    - name: Check if cluster is already initialized
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: kubeadm_init_check
+
+    - name: Initialize Kubernetes Cluster (Master Node)
+      ansible.builtin.shell: |
+        kubeadm init --pod-network-cidr=10.244.0.0/16
+      when: not kubeadm_init_check.stat.exists
+      register: kubeadm_init
+      ignore_errors: no
+
+    - name: Create .kube directory for ubuntu user
+      file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Copy Kubernetes admin.conf to user kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Install Calico CNI network plugin
+      become: yes
+      ansible.builtin.shell: |
+        kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      when: not kubeadm_init_check.stat.exists
+
+# ===================================
+# 4️⃣ Kubernetes Worker Nodes Join Step
+# ===================================
 - name: Join Worker Nodes to Cluster
   hosts: kubernetes_workers
   become: yes
-  tasks:
-    - name: Fetch join command from master
-      ansible.builtin.shell: 
-        cmd: kubeadm token create --print-join-command
-      delegate_to: "{{ groups['kubernetes_master'][0] }}"
-      register: join_command_result
-      run_once: true
+  gather_facts: yes
 
-    - name: Execute join command on worker
-      ansible.builtin.shell:
-        cmd: "{{ join_command_result.stdout }}"
+  tasks:
+    - name: Get join command from master
+      ansible.builtin.shell: kubeadm token create --print-join-command
+      delegate_to: "{{ groups['kubernetes_master'][0] }}"
+      run_once: true
+      register: join_command
+
+    - name: Join node to Kubernetes cluster
+      ansible.builtin.shell: "{{ join_command.stdout }}"
       args:
-        creates: /etc/kubernetes/kubelet.conf # Ensures it doesn't re-run
+        creates: /etc/kubernetes/kubelet.conf
+
+    - name: Confirm node joined successfully
+      ansible.builtin.shell: kubectl get nodes
+      delegate_to: "{{ groups['kubernetes_master'][0] }}"
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: nodes
+      changed_when: false
+
+    - debug:
+        msg: "Cluster nodes after join:\n{{ nodes.stdout_lines }}"

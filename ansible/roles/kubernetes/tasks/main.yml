@@ -1,105 +1,129 @@
-# ansible/roles/tasks/kubernetes/main.yml - Install Kubeadm, Kubelet, Kubectl
+---
+# ==========================================================
+# Role: Kubernetes Installation and Cluster Setup
+# Works for both Master and Worker nodes.
+# ==========================================================
 
-- name: Install dependencies and required packages
+- name: Ensure APT dependencies are installed
+  become: yes
   ansible.builtin.apt:
     name:
       - apt-transport-https
       - ca-certificates
       - curl
-      - gnupg 
+      - gnupg
     state: present
     update_cache: yes
 
-- name: Create the directory for APT keyrings
+- name: Ensure keyrings directory exists
+  become: yes
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
     mode: '0755'
 
-- name: Download Kubernetes GPG key and convert to keyring format
-  # Note: curl command with gpg is still the most reliable way to handle the official K8s key
-  ansible.builtin.shell: 
-    cmd: curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
-    creates: /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+- name: Download Kubernetes GPG key (if not already present)
+  become: yes
+  ansible.builtin.shell: |
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
   args:
-    warn: false 
+    creates: /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+    warn: false
 
-- name: Add Kubernetes apt repository with signed-by
+- name: Add Kubernetes apt repository
+  become: yes
   ansible.builtin.apt_repository:
-    # Note: kubernetes-xenial is the official codename used in the K8s repo path for Debian/Ubuntu
     repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main'
     state: present
     filename: kubernetes
     update_cache: yes
 
-- name: Install kubeadm, kubelet, kubectl, and pin their versions
+# ----------------------------------------------------------
+# INSTALL KUBERNETES COMPONENTS
+# ----------------------------------------------------------
+
+- name: Install Kubernetes tools (kubeadm, kubelet, kubectl)
+  become: yes
   ansible.builtin.apt:
     name:
-      # Use an example version pin, ensure it's available in the repo
-      - kubelet=1.30.0-1.1  
-      - kubeadm=1.30.0-1.1
-      - kubectl=1.30.0-1.1
+      - kubelet
+      - kubeadm
+      - kubectl
     state: present
-    allow_unauthenticated: false 
 
-- name: Disable swap (required for Kubernetes)
+- name: Hold Kubernetes package versions
+  become: yes
+  ansible.builtin.shell: apt-mark hold kubelet kubeadm kubectl
+
+# ----------------------------------------------------------
+# DISABLE SWAP (TEMP + PERMANENT)
+# ----------------------------------------------------------
+
+- name: Disable swap temporarily
+  become: yes
   ansible.builtin.command: swapoff -a
+  ignore_errors: yes
 
-# ----------------------------------------------------
-# MASTER NODE SPECIFIC TASKS
-# These tasks only run on the node defined in the 'kubernetes_master' group
-# ----------------------------------------------------
+- name: Disable swap permanently (comment out swap entries in /etc/fstab)
+  become: yes
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
 
-- name: Initialize Kubernetes Control Plane (Master Node)
+# ----------------------------------------------------------
+# MASTER NODE SETUP
+# ----------------------------------------------------------
+
+- name: Initialize Kubernetes Control Plane
+  become: yes
   ansible.builtin.shell: |
-    # FIX: Removed the in-line comment that caused the YAML parsing error.
     kubeadm init --pod-network-cidr=192.168.0.0/16
   when: inventory_hostname in groups['kubernetes_master']
   args:
     creates: /etc/kubernetes/admin.conf
-    
-# NEW: Wait a moment for the Kubernetes API server to become available 
-# after the init command completes before attempting to create tokens.
-- name: Pause 30 seconds to allow Kube API server to start
+
+- name: Wait 30 seconds for Kubernetes API to stabilize
   ansible.builtin.pause:
     seconds: 30
   when: inventory_hostname in groups['kubernetes_master']
 
-- name: Configure Master Node to use kubectl
+- name: Configure kubectl for root user (so automation works)
+  become: yes
   ansible.builtin.shell: |
-    mkdir -p $HOME/.kube
-    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-    sudo chown $(id -u):$(id -g) $HOME/.kube/config
+    mkdir -p /root/.kube
+    cp -i /etc/kubernetes/admin.conf /root/.kube/config
+    chown root:root /root/.kube/config
   when: inventory_hostname in groups['kubernetes_master']
   args:
-    creates: $HOME/.kube/config
+    creates: /root/.kube/config
 
-- name: Deploy Calico CNI (required for networking)
+- name: Deploy Calico network plugin
+  become: yes
   ansible.builtin.shell: |
-    # Deploy Calico manifest (using a recent stable version)
     kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
   when: inventory_hostname in groups['kubernetes_master']
   args:
     warn: false
 
-# NEW: Fetch the join command from the Master Node
-- name: Get kubeadm join command and register it
-  # FIX: Ensure root privileges for kubeadm token command.
-  ansible.builtin.command: kubeadm token create --print-join-command --ttl 0
-  become: yes # Added for explicit root access, as kubeadm requires it.
-  register: kubeadm_join_command
-  # FIX: Delegate to the master, and let the delegate mechanism handle the execution context.
-  delegate_to: "{{ groups['kubernetes_master'][0] }}" 
-  run_once: true # Ensure this task only runs once across all hosts
-    
-# ----------------------------------------------------
-# ALL NODES (Master and Worker) TASKS
-# ----------------------------------------------------
+# ----------------------------------------------------------
+# FETCH JOIN COMMAND (ON MASTER)
+# ----------------------------------------------------------
 
-# NEW: Execute the join command on the Worker Nodes
-- name: Run kubeadm join on Worker Nodes
+- name: Get kubeadm join command from master
+  become: yes
+  ansible.builtin.command: kubeadm token create --print-join-command --ttl 0
+  register: kubeadm_join_command
+  delegate_to: "{{ groups['kubernetes_master'][0] }}"
+  run_once: true
+
+# ----------------------------------------------------------
+# WORKER NODE JOIN
+# ----------------------------------------------------------
+
+- name: Join worker nodes to Kubernetes cluster
+  become: yes
   ansible.builtin.shell: "{{ kubeadm_join_command.stdout }}"
   when: inventory_hostname in groups['kubernetes_workers']
   args:
-    # Use 'creates' to ensure the task is idempotent and only runs once
     creates: /etc/kubernetes/kubelet.conf
