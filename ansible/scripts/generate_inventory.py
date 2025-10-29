@@ -1,80 +1,87 @@
 import json
 import sys
+from collections import defaultdict
 
-# Define the expected index within the 'ec2_public_ips.value' array 
-# and the corresponding Ansible group names.
-IP_INDEX_MAP = {
-    0: "jenkins",           # Maps aws_instance.ec2[0] IP
-    1: "monitoring",        # Maps aws_instance.ec2[1] IP
-    2: "kubernetes_master", # Maps aws_instance.ec2[2] IP
-    # Index 3 IP (54.163.38.245) is currently ignored as it has no group defined, 
-    # but you can add it here if needed (e.g., 3: "kubernetes_worker").
-}
+# --- Configuration ---
+# EC2 instance index mapping to Ansible group names
+# This must match the index order defined in your Terraform main.tf file:
+# 0: jenkins-server
+# 1: monitoring-server
+# 2: kubernetes-master-node
+# 3: kubernetes-worker-node
+GROUP_MAP = [
+    "jenkins_server",
+    "monitoring_server",
+    "kubernetes_master",
+    "kubernetes_workers",
+]
 
-def generate_inventory(infile, outfile):
-    """Reads Terraform output JSON (assuming 'ec2_public_ips' array) and generates an Ansible inventory file."""
-    
-    print(f"Attempting to read Terraform output from: {infile}", file=sys.stderr)
-
+def generate_inventory(input_file, output_file):
+    """
+    Reads the JSON output of Terraform containing EC2 IPs and generates an
+    Ansible inventory file (INI format).
+    """
     try:
-        with open(infile, 'r') as f:
-            data = json.load(f)
+        with open(input_file, 'r') as f:
+            # Terraform output structure: {"ec2_public_ips": {"value": ["ip0", "ip1", ...]}}
+            tf_output = json.load(f)
+            # Access the array of IPs
+            ip_list = tf_output.get("ec2_public_ips", {}).get("value", [])
+
     except FileNotFoundError:
-        print(f"Error: Input file not found at {infile}. Was 'terraform output -json' run correctly?", file=sys.stderr)
+        print(f"Error: Input file not found: {input_file}", file=sys.stderr)
         sys.exit(1)
     except json.JSONDecodeError:
-        print(f"Error: Could not decode JSON from {infile}. Check Terraform output format.", file=sys.stderr)
+        print(f"Error: Failed to decode JSON from {input_file}. Check Terraform output format.", file=sys.stderr)
         sys.exit(1)
 
-    # CRITICAL: Access the single key 'ec2_public_ips' and its 'value' array
-    ips_data = data.get("ec2_public_ips")
-    if not ips_data or not isinstance(ips_data, dict) or "value" not in ips_data:
-        print("Error: Could not find 'ec2_public_ips.value' array in Terraform JSON output.", file=sys.stderr)
-        print(f"Received JSON keys: {list(data.keys())}", file=sys.stderr)
+    if not ip_list:
+        print("Error: IP list is empty in Terraform output. Ensure 'ec2_public_ips' is correct.", file=sys.stderr)
         sys.exit(1)
-        
-    all_ips = ips_data["value"]
-    inventory_content = []
-    found_ips = False
 
-    # Iterate through the expected indices and assign IPs to groups
-    for index, ansible_group in IP_INDEX_MAP.items():
-        if index < len(all_ips):
-            ip_value = all_ips[index]
+    # Dictionary to hold groups -> IP lists
+    inventory = defaultdict(list)
 
-            if not ip_value:
-                print(f"Warning: IP value at index {index} is empty or null. Skipping group '{ansible_group}'.", file=sys.stderr)
-                continue
+    if len(ip_list) != len(GROUP_MAP):
+        print(f"Warning: IP count ({len(ip_list)}) does not match expected groups ({len(GROUP_MAP)}). Group mapping may be incorrect.", file=sys.stderr)
 
-            # Add group header and host entry
-            inventory_content.append(f"[{ansible_group}]")
-            # Use ansible_user=ubuntu as requested by the user. 
-            # We rely on the SSH agent (Setup SSH Agent step) for the key.
-            inventory_content.append(f"{ip_value} ansible_user=ubuntu\n")
-            found_ips = True
+    # Assign IPs to groups based on their index
+    for i, ip in enumerate(ip_list):
+        if i < len(GROUP_MAP):
+            group_name = GROUP_MAP[i]
+            inventory[group_name].append(ip)
         else:
-            print(f"Warning: Index {index} (for {ansible_group}) is outside the bounds of the IP array (length {len(all_ips)}). Skipping.", file=sys.stderr)
+            # Handle extra IPs gracefully if the count mismatch warning was ignored
+            inventory['extra_hosts'].append(ip)
 
-    if not found_ips:
-        print("Error: Failed to extract any valid IP addresses for the inventory.", file=sys.stderr)
-        sys.exit(1)
+    # Generate INI format content
+    inventory_content = ""
+    # Define connection settings (assuming 'ubuntu' user and SSH key auth)
+    inventory_content += "[all:vars]\n"
+    inventory_content += "ansible_user=ubuntu\n"
+    # Ensure raw module is used for systems where python is not initially configured (common in k8s)
+    inventory_content += "ansible_python_interpreter=/usr/bin/python3\n\n"
 
-    # Add all vars, including StrictHostKeyChecking=no
-    inventory_content.append("[all:vars]")
-    inventory_content.append("ansible_ssh_common_args='-o StrictHostKeyChecking=no'")
+    for group, ips in inventory.items():
+        if ips:
+            inventory_content += f"[{group}]\n"
+            for ip in ips:
+                inventory_content += f"{group}{ips.index(ip) + 1} ansible_host={ip}\n"
+            inventory_content += "\n"
 
     try:
-        with open(outfile, "w") as f:
-            f.write('\n'.join(inventory_content))
-    except Exception as e:
-        print(f"Error writing to output file {outfile}: {e}", file=sys.stderr)
+        with open(output_file, 'w') as f:
+            f.write(inventory_content)
+        print(f"Successfully generated Ansible inventory to {output_file}")
+    except IOError:
+        print(f"Error: Could not write to output file {output_file}", file=sys.stderr)
         sys.exit(1)
-
-    print(f"Inventory file successfully written to {outfile}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        # The script is run from the shell with the two arguments
-        print("Usage: python inventory_generator.py <input_json_file> <output_inventory_file>", file=sys.stderr)
+        print(f"Usage: python3 {sys.argv[0]} <terraform_output_json_file> <output_inventory_file>", file=sys.stderr)
         sys.exit(1)
-    generate_inventory(sys.argv[1], sys.argv[2])
+
+    input_json_file = sys.argv[1]
+    output_ini_file = sys.argv[2]
+    generate_inventory(input_json_file, output_ini_file)

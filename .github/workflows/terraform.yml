@@ -95,10 +95,12 @@ jobs:
           echo "⚙️ Generating Dynamic Inventory..."
           # Change directory to the Ansible folder
           cd ../ansible
-          ls -l # Debug: verify ec2_ips.json exists and inventory_generator.py is present
+          
+          # 🐛 DEBUG CHANGE: List contents of the 'scripts' directory to confirm the file exists
+          echo "Listing contents of 'scripts/' directory:"
+          ls -l scripts/ 
 
           # Execute the Python script (ansible/scripts/inventory_generator.py)
-          # *** THIS IS THE CORRECTED LINE ***
           python3 scripts/inventory_generator.py ec2_ips.json inventory.ini 
 
           echo "✅ Inventory file created:"
