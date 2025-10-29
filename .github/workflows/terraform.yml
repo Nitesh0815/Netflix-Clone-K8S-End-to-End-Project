@@ -43,8 +43,8 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          # Note: v1.13.3 is quite old, consider using a newer version like "1.7.5" or "latest"
-          terraform_version: "1.13.3" 
+          # Use a valid Terraform version (adjust as needed)
+          terraform_version: "1.7.5"
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Terraform Init
@@ -81,15 +81,12 @@ jobs:
           sudo apt update -y
           sudo apt install -y ansible python3 jq
 
-          # Go back to the root of the repo to collect outputs
-          cd ..
-          
           echo "📦 Collecting Terraform Outputs..."
-          # The terraform command is run from the 'Terraform' directory, so we go back in.
-          terraform output -json > ./ansible/ec2_ips.json
+          # We're running inside the Terraform working-directory by default, so write output to the repo's ansible folder
+          terraform output -json > ../ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
-          cd ./ansible
+          cd ../ansible
           ls -l # Debug: verify ec2_ips.json exists
 
           # Extract IPs from Terraform JSON output
@@ -99,7 +96,7 @@ jobs:
 
           # Create a hosts file. We assume the connection user is 'ec2-user' 
           # (common for Amazon Linux AMIs). Adjust if necessary.
-          cat <<EOF > inventory.ini
+          cat <<-EOF > inventory.ini
 [jenkins]
 $JENKINS_IP ansible_user=ec2-user
 
@@ -111,7 +108,7 @@ $MASTER_IP ansible_user=ec2-user
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-EOF
+          EOF
 
           echo "✅ Inventory file created:"
           cat inventory.ini
