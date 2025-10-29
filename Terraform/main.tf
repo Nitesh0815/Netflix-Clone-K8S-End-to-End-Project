@@ -1,19 +1,3 @@
-# Terraform/main.tf
-
-# Data Source to fetch the latest Ubuntu AMI (e.g., Ubuntu 24.04 LTS)
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-*-amd64-server-*"]
-  }
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-  owners = ["099720109477"] # Canonical
-}
-
 # EC2 Instance Resource
 resource "aws_instance" "ec2" {
   count                  = var.ec2_instance_count
