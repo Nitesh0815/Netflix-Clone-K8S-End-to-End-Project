@@ -62,7 +62,7 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
-      # 👇 Run Ansible only after successful Terraform Apply
+      # 👇 Run Ansible automatically after Terraform Apply
       - name: Run Ansible Playbook (Server Configuration)
         if: ${{ github.event.inputs.action == 'apply' }}
         working-directory: ansible
@@ -72,14 +72,12 @@ jobs:
           sudo apt install -y ansible python3
 
           echo "📦 Collecting Terraform Outputs..."
-          cd Terraform
-          terraform output -json ec2_public_ips > ../Ansible/ec2_ips.json
+          cd ../Terraform
+          terraform output -json ec2_public_ips > ../ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
-          cd ../Ansible
+          cd ../ansible
           python3 scripts/generate_inventory.py ec2_ips.json inventory.ini
 
           echo "🚀 Running Ansible Playbook..."
           ansible-playbook -i inventory.ini site.yml
-
-        working-directory: ./
