@@ -4,46 +4,57 @@ locals {
   env     = var.env
 }
 
+# -------------------------------
+# VPC
+# -------------------------------
 resource "aws_vpc" "vpc" {
-  cidr_block           = var.cidr-block
+  cidr_block           = var.cidr_block
   instance_tenancy     = "default"
   enable_dns_hostnames = true
   enable_dns_support   = true
 
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-vpc"
-    Env  = "${local.env}"
+    Env  = local.env
   }
 }
 
+# -------------------------------
+# Internet Gateway
+# -------------------------------
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.vpc.id
 
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-igw"
-    env  = var.env
+    Env  = local.env
   }
 
   depends_on = [aws_vpc.vpc]
 }
 
-resource "aws_subnet" "public-subnet" {
-  count                   = var.pub-subnet-count
+# -------------------------------
+# Public Subnets
+# -------------------------------
+resource "aws_subnet" "public_subnet" {
+  count                   = var.pub_subnet_count
   vpc_id                  = aws_vpc.vpc.id
-  cidr_block              = element(var.pub-cidr-block, count.index)
-  availability_zone       = element(var.pub-availability-zone, count.index)
+  cidr_block              = element(var.pub_cidr_block, count.index)
+  availability_zone       = element(var.pub_availability_zone, count.index)
   map_public_ip_on_launch = true
 
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-public-subnet-${count.index + 1}"
-    Env  = var.env
+    Env  = local.env
   }
 
   depends_on = [aws_vpc.vpc]
 }
 
-
-resource "aws_route_table" "public-rt" {
+# -------------------------------
+# Route Table
+# -------------------------------
+resource "aws_route_table" "public_rt" {
   vpc_id = aws_vpc.vpc.id
 
   route {
@@ -53,43 +64,50 @@ resource "aws_route_table" "public-rt" {
 
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-public-route-table"
-    env  = var.env
+    Env  = local.env
   }
 
   depends_on = [aws_vpc.vpc]
 }
 
-resource "aws_route_table_association" "public-rta" {
-  count          = 4
-  route_table_id = aws_route_table.public-rt.id
-  subnet_id      = aws_subnet.public-subnet[count.index].id
+# -------------------------------
+# Route Table Associations
+# -------------------------------
+resource "aws_route_table_association" "public_rta" {
+  count          = var.pub_subnet_count
+  route_table_id = aws_route_table.public_rt.id
+  subnet_id      = aws_subnet.public_subnet[count.index].id
 
-  depends_on = [aws_vpc.vpc,
-    aws_subnet.public-subnet
+  depends_on = [
+    aws_vpc.vpc,
+    aws_subnet.public_subnet
   ]
 }
 
-resource "aws_security_group" "default-ec2-sg" {
+# -------------------------------
+# Default Security Group
+# -------------------------------
+resource "aws_security_group" "default_ec2_sg" {
   name        = "${local.org}-${local.project}-${local.env}-sg"
-  description = "Default Security Group"
-
-  vpc_id = aws_vpc.vpc.id
+  description = "Default EC2 Security Group"
+  vpc_id      = aws_vpc.vpc.id
 
   ingress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"] // It should be specific IP range
+    cidr_blocks = ["0.0.0.0/0"] # Allow all inbound traffic (for demo)
   }
 
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = ["0.0.0.0/0"] # Allow all outbound traffic
   }
 
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-sg"
+    Env  = local.env
   }
 }
