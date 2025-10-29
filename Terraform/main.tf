@@ -1,3 +1,20 @@
+# Terraform/main.tf
+
+# Data Source to fetch the latest Ubuntu AMI (e.g., Ubuntu 24.04 LTS)
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-*-amd64-server-*"]
+  }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+  owners = ["099720109477"] # Canonical
+}
+
+# EC2 Instance Resource
 resource "aws_instance" "ec2" {
   count                  = var.ec2_instance_count
   ami                    = data.aws_ami.ubuntu.id
@@ -6,7 +23,7 @@ resource "aws_instance" "ec2" {
   key_name               = var.ssh_key_name
   iam_instance_profile   = aws_iam_instance_profile.iam_instance_profile.name
   
-  # CRITICAL: Dynamically select the Security Group based on instance index
+  # Dynamically assign security groups based on index/role
   vpc_security_group_ids = [
     element(
       [
@@ -27,7 +44,6 @@ resource "aws_instance" "ec2" {
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-${local.instance_names[count.index]}"
     Env  = local.env
-    # ADDED TAG: Useful for dynamic inventory
-    Role = split("-", local.instance_names[count.index])[0] 
+    Role = split("-", local.instance_names[count.index])[0] # E.g., "jenkins", "monitoring", "kubernetes"
   }
 }

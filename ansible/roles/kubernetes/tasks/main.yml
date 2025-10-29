@@ -1,43 +1,82 @@
-# ansible/roles/tasks/kubernetes/main.yml (NEW)
-- name: Install dependencies
+# ansible/roles/tasks/kubernetes/main.yml - Install Kubeadm, Kubelet, Kubectl
+
+- name: Install dependencies and required packages
   ansible.builtin.apt:
     name:
       - apt-transport-https
       - ca-certificates
       - curl
-      # Also add 'gnupg' to handle key conversion
       - gnupg 
     state: present
     update_cache: yes
 
+- name: Create the directory for APT keyrings
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
 - name: Download Kubernetes GPG key and convert to keyring format
+  # Note: curl command with gpg is still the most reliable way to handle the official K8s key
   ansible.builtin.shell: 
-    # Use gpg --dearmor to convert the key to the modern binary keyring format
     cmd: curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
     creates: /etc/apt/keyrings/kubernetes-archive-keyring.gpg
   args:
-    warn: false # Suppress warning about using shell
+    warn: false 
 
-- name: Add Kubernetes apt repo with signed-by
+- name: Add Kubernetes apt repository with signed-by
   ansible.builtin.apt_repository:
+    # Note: kubernetes-xenial is the official codename used in the K8s repo path for Debian/Ubuntu
     repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main'
     state: present
     filename: kubernetes
     update_cache: yes
 
-- name: Install kubeadm, kubelet, kubectl
+- name: Install kubeadm, kubelet, kubectl, and pin their versions
   ansible.builtin.apt:
     name:
-      - kubelet
-      - kubeadm
-      - kubectl
+      # Use an example version pin, ensure it's available in the repo
+      - kubelet=1.30.0-1.1  
+      - kubeadm=1.30.0-1.1
+      - kubectl=1.30.0-1.1
     state: present
+    allow_unauthenticated: false 
 
 - name: Disable swap (required for Kubernetes)
   ansible.builtin.command: swapoff -a
 
-- name: Initialize Kubernetes master
-  ansible.builtin.shell: kubeadm init
+# ----------------------------------------------------
+# MASTER NODE SPECIFIC TASKS
+# These tasks only run on the node defined in the 'kubernetes_master' group
+# ----------------------------------------------------
+
+- name: Initialize Kubernetes Control Plane (Master Node)
+  ansible.builtin.shell: |
+    # Using 192.168.0.0/16 because it's the default for the Calico CNI
+    kubeadm init --pod-network-cidr=192.168.0.0/16
   when: inventory_hostname in groups['kubernetes_master']
   args:
     creates: /etc/kubernetes/admin.conf
+
+- name: Configure Master Node to use kubectl
+  ansible.builtin.shell: |
+    mkdir -p $HOME/.kube
+    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    sudo chown $(id -u):$(id -g) $HOME/.kube/config
+  when: inventory_hostname in groups['kubernetes_master']
+  args:
+    creates: $HOME/.kube/config
+
+- name: Deploy Calico CNI (required for networking)
+  ansible.builtin.shell: |
+    # Deploy Calico manifest (using a recent stable version)
+    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
+  when: inventory_hostname in groups['kubernetes_master']
+  args:
+    warn: false
+    
+# ----------------------------------------------------
+# ALL NODES (Master and Worker) TASKS
+# ----------------------------------------------------
+
+# (If you had common sysctl settings or other config, they would go here)

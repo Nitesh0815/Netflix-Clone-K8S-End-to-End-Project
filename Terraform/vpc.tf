@@ -23,8 +23,6 @@ resource "aws_internet_gateway" "igw" {
     Name = "${local.org}-${local.project}-${local.env}-igw"
     Env  = local.env
   }
-
-  depends_on = [aws_vpc.vpc]
 }
 
 # -------------------------------
@@ -41,8 +39,6 @@ resource "aws_subnet" "public_subnet" {
     Name = "${local.org}-${local.project}-${local.env}-public-subnet-${count.index + 1}"
     Env  = local.env
   }
-
-  depends_on = [aws_vpc.vpc]
 }
 
 # -------------------------------
@@ -60,8 +56,6 @@ resource "aws_route_table" "public_rt" {
     Name = "${local.org}-${local.project}-${local.env}-public-route-table"
     Env  = local.env
   }
-
-  depends_on = [aws_vpc.vpc]
 }
 
 # -------------------------------
@@ -71,31 +65,27 @@ resource "aws_route_table_association" "public_rta" {
   count          = var.pub_subnet_count
   route_table_id = aws_route_table.public_rt.id
   subnet_id      = aws_subnet.public_subnet[count.index].id
-
-  depends_on = [
-    aws_vpc.vpc,
-    aws_subnet.public_subnet
-  ]
 }
 
 # -------------------------------
 # 1. Security Group for Jenkins Server (Index 0)
+# NOTE: SSH and UI open to 0.0.0.0/0 for convenience. 
+#       Replace with your IP/VPN CIDR for production (e.g., "203.0.113.0/24")
 # -------------------------------
 resource "aws_security_group" "jenkins_sg" {
   name        = "${local.org}-${local.project}-${local.env}-jenkins-sg"
   description = "Security Group for Jenkins Server (SSH/8080)"
   vpc_id      = aws_vpc.vpc.id
 
-  # Allow SSH from anywhere (0.0.0.0/0 is common for public instances, but VPC CIDR is better)
+  # Allow SSH from anywhere (REPLACE 0.0.0.0/0)
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    # BEST PRACTICE: Replace "0.0.0.0/0" with your office/VPN IP range for production
     cidr_blocks = ["0.0.0.0/0"] 
   }
 
-  # Allow Jenkins UI access
+  # Allow Jenkins UI access (REPLACE 0.0.0.0/0)
   ingress {
     from_port   = 8080
     to_port     = 8080
@@ -103,7 +93,7 @@ resource "aws_security_group" "jenkins_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   
-  # Allow all outbound traffic (default)
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
@@ -120,7 +110,7 @@ resource "aws_security_group" "monitoring_sg" {
   description = "Security Group for Monitoring (SSH/Prometheus/Grafana)"
   vpc_id      = aws_vpc.vpc.id
 
-  # Allow SSH
+  # Allow SSH (REPLACE 0.0.0.0/0)
   ingress {
     from_port   = 22
     to_port     = 22
@@ -128,7 +118,7 @@ resource "aws_security_group" "monitoring_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow Grafana UI
+  # Allow Grafana UI (REPLACE 0.0.0.0/0)
   ingress {
     from_port   = 3000
     to_port     = 3000
@@ -136,7 +126,7 @@ resource "aws_security_group" "monitoring_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow Prometheus UI
+  # Allow Prometheus UI (REPLACE 0.0.0.0/0)
   ingress {
     from_port   = 9090
     to_port     = 9090
@@ -144,7 +134,7 @@ resource "aws_security_group" "monitoring_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   
-  # Allow all outbound traffic (default)
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
@@ -161,7 +151,7 @@ resource "aws_security_group" "kubernetes_sg" {
   description = "Security Group for Kubernetes Nodes (SSH/API/Kubelet)"
   vpc_id      = aws_vpc.vpc.id
 
-  # Allow SSH
+  # Allow SSH (REPLACE 0.0.0.0/0)
   ingress {
     from_port   = 22
     to_port     = 22
@@ -169,16 +159,15 @@ resource "aws_security_group" "kubernetes_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow K8s API Server (Control Plane access)
+  # Allow K8s API Server (Control Plane access) - RESTRICTED TO JENKINS SG
   ingress {
-  from_port   = 6443
-  to_port     = 6443
-  protocol    = "tcp"
-  # Allow traffic only from the Jenkins SG
-  security_groups = [aws_security_group.jenkins_sg.id] 
-}
+    from_port       = 6443
+    to_port         = 6443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.jenkins_sg.id] 
+  }
   
-  # Allow all outbound traffic (default)
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0

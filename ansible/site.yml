@@ -1,17 +1,37 @@
+# ansible/site.yml - Main Playbook
+---
 - name: Configure Jenkins Server
-  hosts: jenkins
+  hosts: jenkins_server
   become: yes
   roles:
-    - jenkins
+    - { role: jenkins } # Assuming the role is named 'jenkins'
 
-- name: Configure Monitoring Stack
-  hosts: monitoring
+- name: Configure Monitoring Server
+  hosts: monitoring_server
   become: yes
   roles:
-    - monitoring
+    - { role: monitoring } # Assuming you have a 'monitoring' role
 
-- name: Configure Kubernetes Cluster
-  hosts: kubernetes_master
+- name: Configure Kubernetes Nodes
+  hosts: kubernetes_nodes
   become: yes
   roles:
-    - kubernetes
+    - { role: kubernetes } # Assuming the role is named 'kubernetes'
+
+# Separate task to handle joining nodes after master is initialized
+- name: Join Worker Nodes to Cluster
+  hosts: kubernetes_workers
+  become: yes
+  tasks:
+    - name: Fetch join command from master
+      ansible.builtin.shell: 
+        cmd: kubeadm token create --print-join-command
+      delegate_to: "{{ groups['kubernetes_master'][0] }}"
+      register: join_command_result
+      run_once: true
+
+    - name: Execute join command on worker
+      ansible.builtin.shell:
+        cmd: "{{ join_command_result.stdout }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf # Ensures it doesn't re-run

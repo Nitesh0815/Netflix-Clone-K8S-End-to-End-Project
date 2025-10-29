@@ -1,16 +1,22 @@
-# ansible/roles/tasks/jenkins/main.yml (NEW)
-- name: Install Java
+# ansible/roles/tasks/jenkins/main.yml - Install and Configure Jenkins
+- name: Install Java 17 (required for Jenkins)
   ansible.builtin.apt:
     name: openjdk-17-jdk
     state: present
     update_cache: yes
 
-- name: Download Jenkins GPG key
+- name: Create the directory for APT keyrings (secure Debian practice)
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download Jenkins GPG key to keyring file
   ansible.builtin.get_url:
     url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
     dest: /usr/share/keyrings/jenkins-keyring.asc
     mode: '0644'
-    # Ansible 'get_url' is idempotent and handles download
+    # Use get_url for secure and idempotent key downloading
 
 - name: Add Jenkins repository with signed-by
   ansible.builtin.apt_repository:
@@ -19,12 +25,12 @@
     filename: jenkins
     update_cache: yes
 
-- name: Install Jenkins
+- name: Install Jenkins package
   ansible.builtin.apt:
     name: jenkins
     state: present
 
-- name: Enable and Start Jenkins
+- name: Ensure Jenkins service is running and enabled
   ansible.builtin.systemd:
     name: jenkins
     state: started
