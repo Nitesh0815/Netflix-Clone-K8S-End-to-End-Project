@@ -72,12 +72,13 @@ jobs:
           sudo apt install -y ansible python3
 
           echo "📦 Collecting Terraform Outputs..."
-          cd ../Terraform
-          terraform output -json > ../ansible/ec2_outputs.json
+          terraform -chdir=Terraform output -json ec2_public_ips > ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
-          cd ../ansible
+          cd ansible
+          ls -l  # Debugging: ensure ec2_ips.json exists
           python3 scripts/generate_inventory.py ec2_ips.json inventory.ini
+
 
           echo "🚀 Running Ansible Playbook..."
           ansible-playbook -i inventory.ini site.yml
