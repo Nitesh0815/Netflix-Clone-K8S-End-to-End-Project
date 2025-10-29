@@ -27,7 +27,6 @@ jobs:
   terraform:
     name: Terraform ${{ github.event.inputs.action }}
     runs-on: ubuntu-latest
-    environment: production
 
     defaults:
       run:
@@ -62,23 +61,21 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
-      # 👇 Run Ansible automatically after Terraform Apply
-      - name: Run Ansible Playbook (Server Configuration)
+      # 🔧 Run Ansible after Terraform Apply
+      - name: Run Ansible Playbook
         if: ${{ github.event.inputs.action == 'apply' }}
-        working-directory: ansible
         run: |
           echo "🟢 Installing Ansible..."
           sudo apt update -y
           sudo apt install -y ansible python3
 
           echo "📦 Collecting Terraform Outputs..."
-          terraform -chdir=Terraform output -json ec2_public_ips > ansible/ec2_ips.json
+          terraform output -json ec2_public_ips > ../ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
-          cd ansible
-          ls -l  # Debugging: ensure ec2_ips.json exists
+          cd ../ansible
+          ls -l  # Debugging: verify ec2_ips.json exists
           python3 scripts/generate_inventory.py ec2_ips.json inventory.ini
-
 
           echo "🚀 Running Ansible Playbook..."
           ansible-playbook -i inventory.ini site.yml
