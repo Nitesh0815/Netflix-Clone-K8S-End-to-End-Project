@@ -21,6 +21,8 @@ env:
   # Secrets for AWS Provider
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  # 1. CRITICAL ADDITION: Pass AWS Key Pair name to Terraform via TF_VAR
+  TF_VAR_ssh_key_name: ${{ secrets.AWS_KEY_PAIR_NAME }}
 
 permissions:
   contents: read
@@ -81,15 +83,14 @@ jobs:
           sudo apt update -y
           sudo apt install -y ansible python3 jq
 
-          # Go back to the root of the repo to collect outputs
-          cd ..
-          
+          # 2. FIX: We stay in the 'Terraform' directory to run 'terraform output'
           echo "📦 Collecting Terraform Outputs..."
-          # The terraform command is run from the 'Terraform' directory, so we go back in.
-          terraform output -json > ./ansible/ec2_ips.json
+          # Output is written one directory up into the 'ansible' folder
+          terraform output -json > ../ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
-          cd ./ansible
+          cd ../ansible # Move to repo_root/ansible to run the playbook
+
           ls -l # Debug: verify ec2_ips.json exists
 
           # Extract IPs from Terraform JSON output
@@ -119,9 +120,7 @@ jobs:
           sleep 60
           
           echo "🚀 Running Ansible Playbook with wait_for_connection..."
-          # The -u ec2-user is redundant if set in inventory, but good practice.
-          # We use the 'wait_for_connection' plugin via ad-hoc command before running the playbook.
-          # This ensures the instance is up and ready for SSH.
+          # Ensure the instance is up and ready for SSH before running the main playbook.
           ansible all -i inventory.ini -m wait_for_connection -a "delay=5 timeout=300"
           
           echo "✅ SSH Connection Established. Running site.yml..."
