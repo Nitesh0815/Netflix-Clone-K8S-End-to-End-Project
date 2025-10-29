@@ -1,12 +1,3 @@
-locals {
-  instance_names = [
-    "jenkins-server",
-    "monitoring-server",
-    "kubernetes-master-node",
-    "kubernetes-worker-node"
-  ]
-}
-
 resource "aws_instance" "ec2" {
   count                  = var.ec2_instance_count
   ami                    = data.aws_ami.ubuntu.id

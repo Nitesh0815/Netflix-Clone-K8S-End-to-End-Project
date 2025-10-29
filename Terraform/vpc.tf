@@ -1,9 +1,3 @@
-locals {
-  org     = "aman"
-  project = "netflix-clone"
-  env     = var.env
-}
-
 # -------------------------------
 # VPC
 # -------------------------------
