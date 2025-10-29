@@ -110,6 +110,9 @@ jobs:
           echo "😴 Waiting 60 seconds for EC2 instances to become fully reachable..."
           sleep 60
           
+          # FIX: Export the environment variable to disable Host Key Checking for Ansible
+          export ANSIBLE_HOST_KEY_CHECKING=False
+          
           echo "🚀 Running Ansible Playbook with wait_for_connection..."
           # Use -u ubuntu for the connection user, as configured in the Python script.
           ansible all -i inventory.ini -u ubuntu -m wait_for_connection -a "delay=5 timeout=300"
