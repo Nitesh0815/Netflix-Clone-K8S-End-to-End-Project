@@ -1,6 +1,6 @@
 locals {
   # 👇 Basic identifiers used for naming resources
-  org     = "aman"
+  org     = "Nitesh"
   project = "netflix-clone"
   env     = var.env
 

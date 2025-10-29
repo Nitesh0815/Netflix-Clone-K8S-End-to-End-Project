@@ -5,7 +5,7 @@ on:
     inputs:
       action:
         type: choice
-        description: 'Terraform Action'
+        description: 'Select Terraform Action'
         options:
           - plan
           - apply
@@ -26,7 +26,7 @@ permissions:
 jobs:
   terraform:
     name: Terraform ${{ github.event.inputs.action }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     environment: production
 
     defaults:
@@ -35,14 +35,13 @@ jobs:
         working-directory: Terraform
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v5
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
-          terraform_wrapper: true
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Terraform Init
@@ -63,22 +62,24 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
-      # 👇 Run Ansible only after successful Terraform apply
-      - name: Run Ansible Playbook (Provision Servers)
+      # 👇 Run Ansible only after successful Terraform Apply
+      - name: Run Ansible Playbook (Server Configuration)
         if: ${{ github.event.inputs.action == 'apply' }}
-        working-directory: Ansible
+        working-directory: ansible
         run: |
+          echo "🟢 Installing Ansible..."
           sudo apt update -y
-          sudo apt install ansible -y
+          sudo apt install -y ansible python3
 
-          # Get EC2 IPs from Terraform outputs
-          cd ../Terraform
+          echo "📦 Collecting Terraform Outputs..."
+          cd Terraform
           terraform output -json ec2_public_ips > ../Ansible/ec2_ips.json
 
+          echo "⚙️ Generating Dynamic Inventory..."
           cd ../Ansible
-
-          # Create dynamic inventory for Ansible
           python3 scripts/generate_inventory.py ec2_ips.json inventory.ini
 
-          # Run the Ansible playbook
+          echo "🚀 Running Ansible Playbook..."
           ansible-playbook -i inventory.ini site.yml
+
+        working-directory: ./
