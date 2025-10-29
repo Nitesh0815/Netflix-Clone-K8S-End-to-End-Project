@@ -28,7 +28,7 @@
     curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
   args:
     creates: /etc/apt/keyrings/kubernetes-archive-keyring.gpg
-    warn: false
+  changed_when: false
 
 - name: Add Kubernetes apt repository
   become: yes
@@ -54,6 +54,7 @@
 - name: Hold Kubernetes package versions
   become: yes
   ansible.builtin.shell: apt-mark hold kubelet kubeadm kubectl
+  changed_when: false
 
 # ----------------------------------------------------------
 # DISABLE SWAP (TEMP + PERMANENT)
@@ -88,7 +89,7 @@
     seconds: 30
   when: inventory_hostname in groups['kubernetes_master']
 
-- name: Configure kubectl for root user (so automation works)
+- name: Configure kubectl for root user
   become: yes
   ansible.builtin.shell: |
     mkdir -p /root/.kube
@@ -103,8 +104,7 @@
   ansible.builtin.shell: |
     kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
   when: inventory_hostname in groups['kubernetes_master']
-  args:
-    warn: false
+  changed_when: false
 
 # ----------------------------------------------------------
 # FETCH JOIN COMMAND (ON MASTER)
