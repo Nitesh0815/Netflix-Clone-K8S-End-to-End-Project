@@ -73,7 +73,7 @@ jobs:
 
           echo "📦 Collecting Terraform Outputs..."
           cd ../Terraform
-          terraform output -json ec2_public_ips > ../ansible/ec2_ips.json
+          terraform output -json > ../ansible/ec2_outputs.json
 
           echo "⚙️ Generating Dynamic Inventory..."
           cd ../ansible
