@@ -43,7 +43,6 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          # Use a valid Terraform version (adjust as needed)
           terraform_version: "1.7.5"
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
@@ -70,7 +69,6 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          # This secret MUST contain the private key used to launch the EC2 instances
           ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
 
       # 🔧 Run Ansible after Terraform Apply
@@ -82,21 +80,19 @@ jobs:
           sudo apt install -y ansible python3 jq
 
           echo "📦 Collecting Terraform Outputs..."
-          # We're running inside the Terraform working-directory by default, so write output to the repo's ansible folder
           terraform output -json > ../ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
           cd ../ansible
-          ls -l # Debug: verify ec2_ips.json exists
+          ls -l  # Debug: verify ec2_ips.json exists
 
           # Extract IPs from Terraform JSON output
           JENKINS_IP=$(jq -r '.jenkins_server_ip.value' ec2_ips.json)
           MONITORING_IP=$(jq -r '.monitoring_server_ip.value' ec2_ips.json)
           MASTER_IP=$(jq -r '.k8s_master_ip.value' ec2_ips.json)
 
-          # Create a hosts file. We assume the connection user is 'ec2-user' 
-          # (common for Amazon Linux AMIs). Adjust if necessary.
-          cat <<-EOF > inventory.ini
+          echo "📝 Creating Ansible Inventory File..."
+          cat <<EOF > inventory.ini
 [jenkins]
 $JENKINS_IP ansible_user=ec2-user
 
@@ -108,20 +104,16 @@ $MASTER_IP ansible_user=ec2-user
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-          EOF
+EOF
 
           echo "✅ Inventory file created:"
           cat inventory.ini
-          
-          # Optional: Add a brief pause to allow EC2 instances to fully initialize SSH
-          echo "😴 Waiting 60 seconds for EC2 instances to become fully reachable..."
+
+          echo "😴 Waiting 60 seconds for EC2 instances to become reachable..."
           sleep 60
-          
-          echo "🚀 Running Ansible Playbook with wait_for_connection..."
-          # The -u ec2-user is redundant if set in inventory, but good practice.
-          # We use the 'wait_for_connection' plugin via ad-hoc command before running the playbook.
-          # This ensures the instance is up and ready for SSH.
+
+          echo "🚀 Checking SSH connectivity..."
           ansible all -i inventory.ini -m wait_for_connection -a "delay=5 timeout=300"
-          
+
           echo "✅ SSH Connection Established. Running site.yml..."
           ansible-playbook -i inventory.ini site.yml
