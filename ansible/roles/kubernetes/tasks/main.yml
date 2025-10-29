@@ -57,6 +57,13 @@
   when: inventory_hostname in groups['kubernetes_master']
   args:
     creates: /etc/kubernetes/admin.conf
+    
+# NEW: Wait a moment for the Kubernetes API server to become available 
+# after the init command completes before attempting to create tokens.
+- name: Pause 30 seconds to allow Kube API server to start
+  ansible.builtin.pause:
+    seconds: 30
+  when: inventory_hostname in groups['kubernetes_master']
 
 - name: Configure Master Node to use kubectl
   ansible.builtin.shell: |
@@ -74,9 +81,24 @@
   when: inventory_hostname in groups['kubernetes_master']
   args:
     warn: false
+
+# NEW: Fetch the join command from the Master Node
+- name: Get kubeadm join command and register it
+  # We use the '--ttl 0' flag to create a non-expiring token for this automated run
+  ansible.builtin.command: kubeadm token create --print-join-command --ttl 0
+  register: kubeadm_join_command
+  # FIX: Delegate to the master, and let the delegate mechanism handle the execution context.
+  delegate_to: "{{ groups['kubernetes_master'][0] }}" 
+  run_once: true # Ensure this task only runs once across all hosts
     
 # ----------------------------------------------------
 # ALL NODES (Master and Worker) TASKS
 # ----------------------------------------------------
 
-# (If you had common sysctl settings or other config, they would go here)
+# NEW: Execute the join command on the Worker Nodes
+- name: Run kubeadm join on Worker Nodes
+  ansible.builtin.shell: "{{ kubeadm_join_command.stdout }}"
+  when: inventory_hostname in groups['kubernetes_workers']
+  args:
+    # Use 'creates' to ensure the task is idempotent and only runs once
+    creates: /etc/kubernetes/kubelet.conf
