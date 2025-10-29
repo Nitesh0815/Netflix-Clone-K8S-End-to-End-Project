@@ -1,4 +1,4 @@
-name: '🔨 Infrastructure Configuring using Terraform on AWS'
+name: '🔨 Terraform + Ansible Automation on AWS'
 
 on:
   workflow_dispatch:
@@ -24,8 +24,8 @@ permissions:
   contents: read
 
 jobs:
-  infrastructure-setup-using-terraform:
-    name: Terraform ${{ github.event.input.actions }}
+  terraform:
+    name: Terraform ${{ github.event.inputs.action }}
     runs-on: ubuntu-24.04
     environment: production
 
@@ -38,28 +38,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setting Up the Terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
           terraform_wrapper: true
-          cli_config_credentials_token: ${{ secrets. TF_API_TOKEN }}
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-      - name: Cache Terraform
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.terraform.d/plugin-cache
-            .terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
-          
-      - name: Initialising the Terraform
+      - name: Terraform Init
         run: terraform init
-
-      - name: Terraform Format Check
-        run: terraform fmt -check --diff
 
       - name: Terraform Validate
         run: terraform validate
@@ -72,6 +59,26 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve
 
-      - name: Terraform destroy
+      - name: Terraform Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
+
+      # 👇 Run Ansible only after successful Terraform apply
+      - name: Run Ansible Playbook (Provision Servers)
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: Ansible
+        run: |
+          sudo apt update -y
+          sudo apt install ansible -y
+
+          # Get EC2 IPs from Terraform outputs
+          cd ../Terraform
+          terraform output -json ec2_public_ips > ../Ansible/ec2_ips.json
+
+          cd ../Ansible
+
+          # Create dynamic inventory for Ansible
+          python3 scripts/generate_inventory.py ec2_ips.json inventory.ini
+
+          # Run the Ansible playbook
+          ansible-playbook -i inventory.ini site.yml

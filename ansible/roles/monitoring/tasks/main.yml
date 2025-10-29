@@ -1,0 +1,38 @@
+- name: Install dependencies
+  apt:
+    name:
+      - docker.io
+      - docker-compose
+    state: present
+    update_cache: yes
+
+- name: Ensure Docker service is running
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Create monitoring directory
+  file:
+    path: /opt/monitoring
+    state: directory
+
+- name: Deploy Prometheus and Grafana containers
+  copy:
+    dest: /opt/monitoring/docker-compose.yml
+    content: |
+      version: '3'
+      services:
+        prometheus:
+          image: prom/prometheus
+          ports:
+            - "9090:9090"
+        grafana:
+          image: grafana/grafana
+          ports:
+            - "3000:3000"
+
+- name: Start monitoring stack
+  command: docker-compose -f /opt/monitoring/docker-compose.yml up -d
+  args:
+    chdir: /opt/monitoring
