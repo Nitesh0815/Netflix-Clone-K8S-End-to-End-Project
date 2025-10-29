@@ -101,7 +101,8 @@ jobs:
           ls -l scripts/ 
 
           # Execute the Python script (ansible/scripts/inventory_generator.py)
-          python3 scripts/inventory_generator.py ec2_ips.json inventory.ini 
+          # FIX: Changed 'inventory_generator.py' to 'generate_inventory.py'
+          python3 scripts/generate_inventory.py ec2_ips.json inventory.ini 
 
           echo "✅ Inventory file created:"
           cat inventory.ini
