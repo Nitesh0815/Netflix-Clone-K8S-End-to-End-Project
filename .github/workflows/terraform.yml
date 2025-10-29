@@ -43,7 +43,8 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.7.5"
+          # Using the requested version 1.7.5
+          terraform_version: "1.7.5" 
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Terraform Init
@@ -69,6 +70,7 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         uses: webfactory/ssh-agent@v0.9.0
         with:
+          # This secret MUST contain the private key used to launch the EC2 instances
           ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
 
       # 🔧 Run Ansible after Terraform Apply
@@ -79,41 +81,48 @@ jobs:
           sudo apt update -y
           sudo apt install -y ansible python3 jq
 
+          # Go back to the root of the repo to collect outputs
+          cd ..
+          
           echo "📦 Collecting Terraform Outputs..."
-          terraform output -json > ../ansible/ec2_ips.json
+          # The terraform command is run from the 'Terraform' directory, so we go back in.
+          terraform output -json > ./ansible/ec2_ips.json
 
           echo "⚙️ Generating Dynamic Inventory..."
-          cd ../ansible
-          ls -l  # Debug: verify ec2_ips.json exists
+          cd ./ansible
+          ls -l # Debug: verify ec2_ips.json exists
 
           # Extract IPs from Terraform JSON output
           JENKINS_IP=$(jq -r '.jenkins_server_ip.value' ec2_ips.json)
           MONITORING_IP=$(jq -r '.monitoring_server_ip.value' ec2_ips.json)
           MASTER_IP=$(jq -r '.k8s_master_ip.value' ec2_ips.json)
 
-          echo "📝 Creating Ansible Inventory File..."
-          cat <<EOF > inventory.ini
-[jenkins]
-$JENKINS_IP ansible_user=ec2-user
-
-[monitoring]
-$MONITORING_IP ansible_user=ec2-user
-
-[kubernetes_master]
-$MASTER_IP ansible_user=ec2-user
-
-[all:vars]
-ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-EOF
+          # Create a hosts file using printf to avoid YAML parser errors
+          echo "" > inventory.ini # Clear the file
+          printf "[jenkins]\n" >> inventory.ini
+          printf "%s ansible_user=ec2-user\n\n" "$JENKINS_IP" >> inventory.ini
+          
+          printf "[monitoring]\n" >> inventory.ini
+          printf "%s ansible_user=ec2-user\n\n" "$MONITORING_IP" >> inventory.ini
+          
+          printf "[kubernetes_master]\n" >> inventory.ini
+          printf "%s ansible_user=ec2-user\n\n" "$MASTER_IP" >> inventory.ini
+          
+          printf "[all:vars]\n" >> inventory.ini
+          printf "ansible_ssh_common_args='-o StrictHostKeyChecking=no'\n" >> inventory.ini
 
           echo "✅ Inventory file created:"
           cat inventory.ini
-
-          echo "😴 Waiting 60 seconds for EC2 instances to become reachable..."
+          
+          # Optional: Add a brief pause to allow EC2 instances to fully initialize SSH
+          echo "😴 Waiting 60 seconds for EC2 instances to become fully reachable..."
           sleep 60
-
-          echo "🚀 Checking SSH connectivity..."
+          
+          echo "🚀 Running Ansible Playbook with wait_for_connection..."
+          # The -u ec2-user is redundant if set in inventory, but good practice.
+          # We use the 'wait_for_connection' plugin via ad-hoc command before running the playbook.
+          # This ensures the instance is up and ready for SSH.
           ansible all -i inventory.ini -m wait_for_connection -a "delay=5 timeout=300"
-
+          
           echo "✅ SSH Connection Established. Running site.yml..."
           ansible-playbook -i inventory.ini site.yml
