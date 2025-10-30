@@ -70,47 +70,18 @@ resource "aws_route_table_association" "public-rta" {
 }
 
 resource "aws_security_group" "default-ec2-sg" {
-  name        = "${local.org}-${local.project}-${local.env}-default-ec2-sg"
-  description = "Default security group for all EC2 instances"
-  vpc_id      = aws_vpc.vpc.id
+  name        = "${local.org}-${local.project}-${local.env}-sg"
+  description = "Default Security Group"
 
-  # Ingress Rule: Allow SSH (Port 22)
+  vpc_id = aws_vpc.vpc.id
+
   ingress {
-    description = "SSH Access"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"] // It should be specific IP range
   }
 
-  # Ingress Rule: Allow Jenkins Web UI (Port 8080)
-  ingress {
-    description = "Jenkins Web UI"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Ingress Rule: Allow Grafana Web UI (Port 3000)
-  ingress {
-    description = "Grafana Web UI"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Ingress Rule: Allow K8s API Server (Port 6443)
-  ingress {
-    description = "Kubernetes API Server"
-    from_port   = 6443
-    to_port     = 6443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Egress Rule: Allow All Outbound Traffic
   egress {
     from_port   = 0
     to_port     = 0
@@ -119,7 +90,6 @@ resource "aws_security_group" "default-ec2-sg" {
   }
 
   tags = {
-    Name = "${local.org}-${local.project}-${local.env}-default-ec2-sg"
-    Env  = "${local.env}"
+    Name = "${local.org}-${local.project}-${local.env}-sg"
   }
 }

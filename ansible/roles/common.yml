@@ -1,0 +1,48 @@
+---
+# ==============================================================
+# Role: Common Configuration for All EC2 Instances
+# Description: Installs base packages, updates system, sets timezone,
+#              and ensures SSM agent is running.
+# ==============================================================
+
+- name: "Update & upgrade all packages"
+  become: yes
+  apt:
+    update_cache: yes
+    upgrade: yes
+    cache_valid_time: 3600
+
+- name: "Install common utilities"
+  become: yes
+  apt:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: "Set system timezone"
+  become: yes
+  timezone:
+    name: "{{ timezone | default('Asia/Kolkata') }}"
+
+- name: "Ensure Amazon SSM agent is installed and running"
+  become: yes
+  apt:
+    name: amazon-ssm-agent
+    state: present
+  register: ssm_install
+
+- name: "Enable and start amazon-ssm-agent service"
+  become: yes
+  service:
+    name: amazon-ssm-agent
+    enabled: yes
+    state: started
+
+- name: "Verify SSM agent status"
+  become: yes
+  command: systemctl is-active amazon-ssm-agent
+  register: ssm_status
+  changed_when: false
+
+- name: "Show SSM agent status"
+  debug:
+    msg: "Amazon SSM agent is currently {{ ssm_status.stdout }}"

@@ -1,0 +1,142 @@
+---
+# ============================================
+# Role: Monitoring Server Setup (Prometheus + Grafana)
+# ============================================
+
+- name: Update apt packages
+  become: yes
+  ansible.builtin.apt:
+    update_cache: yes
+
+# -------------------------------
+# Install Prometheus
+# -------------------------------
+- name: Create Prometheus system user
+  become: yes
+  ansible.builtin.user:
+    name: prometheus
+    shell: /sbin/nologin
+    system: yes
+    create_home: no
+
+- name: Download Prometheus package
+  become: yes
+  ansible.builtin.get_url:
+    url: https://github.com/prometheus/prometheus/releases/download/v2.52.0/prometheus-2.52.0.linux-amd64.tar.gz
+    dest: /tmp/prometheus.tar.gz
+
+- name: Extract Prometheus package
+  become: yes
+  ansible.builtin.unarchive:
+    src: /tmp/prometheus.tar.gz
+    dest: /opt/
+    remote_src: yes
+
+- name: Move Prometheus binaries
+  become: yes
+  ansible.builtin.command: mv /opt/prometheus-2.52.0.linux-amd64/{prometheus,promtool} /usr/local/bin/
+  args:
+    creates: /usr/local/bin/prometheus
+
+- name: Create Prometheus directories
+  become: yes
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: prometheus
+    group: prometheus
+  loop:
+    - /etc/prometheus
+    - /var/lib/prometheus
+
+- name: Copy Prometheus configuration
+  become: yes
+  ansible.builtin.copy:
+    dest: /etc/prometheus/prometheus.yml
+    owner: prometheus
+    group: prometheus
+    content: |
+      global:
+        scrape_interval: 15s
+
+      scrape_configs:
+        - job_name: 'prometheus'
+          static_configs:
+            - targets: ['localhost:9090']
+        - job_name: 'jenkins'
+          static_configs:
+            - targets: ['{{ hostvars[groups["jenkins_server"][0]].ansible_host }}:9100']
+        - job_name: 'kubernetes-nodes'
+          static_configs:
+            - targets:
+                {% for host in groups['k8s_master'] + groups['k8s_worker'] %}
+                - '{{ hostvars[host].ansible_host }}:9100'
+                {% endfor %}
+
+- name: Create Prometheus systemd service
+  become: yes
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/prometheus.service
+    content: |
+      [Unit]
+      Description=Prometheus Monitoring
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=prometheus
+      ExecStart=/usr/local/bin/prometheus \
+        --config.file=/etc/prometheus/prometheus.yml \
+        --storage.tsdb.path=/var/lib/prometheus \
+        --web.listen-address=:9090
+      Restart=on-failure
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Start and enable Prometheus
+  become: yes
+  ansible.builtin.systemd:
+    name: prometheus
+    enabled: yes
+    state: started
+
+# -------------------------------
+# Install Grafana
+# -------------------------------
+- name: Add Grafana APT key
+  become: yes
+  ansible.builtin.shell: |
+    curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor -o /usr/share/keyrings/grafana.gpg
+  args:
+    creates: /usr/share/keyrings/grafana.gpg
+
+- name: Add Grafana repository
+  become: yes
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/grafana.list
+    content: |
+      deb [signed-by=/usr/share/keyrings/grafana.gpg] https://apt.grafana.com stable main
+
+- name: Install Grafana
+  become: yes
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+    update_cache: yes
+
+- name: Enable and start Grafana service
+  become: yes
+  ansible.builtin.systemd:
+    name: grafana-server
+    enabled: yes
+    state: started
+
+# -------------------------------
+# Show Grafana access info
+# -------------------------------
+- name: Display Grafana access details
+  ansible.builtin.debug:
+    msg:
+      - "Prometheus running at http://{{ ansible_host }}:9090"
+      - "Grafana running at http://{{ ansible_host }}:3000 (default login: admin / admin)"

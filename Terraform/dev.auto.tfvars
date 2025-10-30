@@ -8,5 +8,3 @@ ec2-instance-count    = 4
 ec2_instance_type     = ["t3a.xlarge", "t3a.medium", "t3a.medium", "t3a.medium"]
 ec2_volume_size       = 50
 ec2_volume_type       = "gp3"
-project               = "netflix-clone"
-ssh_public_key        = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDNiteshNiteshNiteshNiteshNiteshNiteshNitesh PLACEHOLDER_KEY"

@@ -1,76 +1,100 @@
-name: "🔨 Terraform + Ansible Automation on AWS"
+name: '🔨 Terraform + Ansible Automation on AWS'
 
 on:
   workflow_dispatch:
     inputs:
       action:
         type: choice
-        description: "Select Terraform Action"
+        description: 'Terraform Action'
         options:
           - plan
           - apply
           - destroy
         required: true
-        default: "plan"
+        default: 'plan'
 
 env:
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  AWS_DEFAULT_REGION: "ap-south-1"
+  TF_WORKSPACE: ${{ secrets.TF_WORKSPACE }}
+  TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
+
+permissions:
+  contents: read
 
 jobs:
-  terraform-ansible:
-    runs-on: ubuntu-latest
+  terraform-ansible-deploy:
+    name: Terraform ${{ github.event.inputs.action }}
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: Terraform
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.5
+          terraform_version: "1.13.3"
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
-      - name: Terraform ${{ github.event.inputs.action }}
-        run: terraform ${{ github.event.inputs.action }} -auto-approve
+      - name: Terraform Format Check
+        run: terraform fmt -check --diff
 
-      - name: Setup Python for Ansible
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        if: ${{ github.event.inputs.action == 'plan' }}
+        run: terraform plan -input=false
+
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform apply -auto-approve
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: terraform destroy -auto-approve
+
+      - name: Save Terraform Outputs
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform output -json > tf_outputs.json
+
+      # --- Build simplified Ansible inventory ---
+      - name: Generate Ansible Inventory
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          cd ..
+          python3 ansible/generate_inventory.py
+          echo "✅ Generated ansible/inventory.yml"
 
       - name: Install Ansible
+        if: ${{ github.event.inputs.action == 'apply' }}
         run: |
-          pip install ansible boto3
+          sudo apt-get update -y
+          sudo apt-get install -y python3 python3-pip
+          pip3 install ansible boto3 botocore
+          ansible-galaxy collection install amazon.aws
 
-      - name: Generate Dynamic Inventory
-        run: |
-          cat <<'PY' > generate_inventory.py
-          import json, sys, os
-
-          INSTANCE_GROUPS = {
-              0: "jenkins_server",
-              1: "monitoring_server",
-              2: "k8s_master",
-              3: "k8s_worker"
-          }
-
-          inventory = {"_meta": {"hostvars": {}}}
-          for idx, name in INSTANCE_GROUPS.items():
-              inventory[name] = {"hosts": [f"{name}_host_{idx}"]}
-              inventory["_meta"]["hostvars"][f"{name}_host_{idx}"] = {
-                  "ansible_host": f"192.168.1.{10+idx}"
-              }
-
-          print(json.dumps(inventory, indent=2))
-          PY
-
-      - name: Verify Inventory
-        run: python3 generate_inventory.py
-
+      # --- Run simplified playbook ---
       - name: Run Ansible Playbook
-        run: ansible-playbook -i generate_inventory.py playbook.yml
+        if: ${{ github.event.inputs.action == 'apply' }}
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          cd ..
+          export ANSIBLE_HOST_KEY_CHECKING=False
+          ansible-playbook -i ansible/inventory.yml ansible/playbook.yml -v
