@@ -1,6 +1,6 @@
-name: '🔨 Terraform + Ansible Automation on AWS'
+name: '🔨 Infrastructure Configuring using Terraform on AWS' 
 
-on:
+on: 
   workflow_dispatch:
     inputs:
       action:
@@ -17,14 +17,15 @@ env:
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
   TF_WORKSPACE: ${{ secrets.TF_WORKSPACE }}
   TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
-
 permissions:
   contents: read
 
+
 jobs:
-  terraform-ansible-deploy:
-    name: Terraform ${{ github.event.inputs.action }}
+  infrastructure-setup-using-terraform:
+    name: Terraform ${{ github.event.input.actions }}
     runs-on: ubuntu-24.04
+    environment: production
 
     defaults:
       run:
@@ -32,40 +33,44 @@ jobs:
         working-directory: Terraform
 
     steps:
-      - name: 🧾 Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: 🔑 Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: ⚙️ Setup Terraform
+      - name: Setting Up the Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
-          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_wrapper: true
+          cli_config_credentials_token: ${{ secrets. TF_API_TOKEN }}
 
-      - name: 🏗️ Terraform Init
-        run: terraform init -input=false
+      - name: Cache Terraform
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            .terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+          
+      - name: Initialising the Terraform
+        run: terraform init
 
-      - name: 🧹 Terraform Format Check
+      - name: Terraform Format Check
         run: terraform fmt -check --diff
 
-      - name: ✅ Terraform Validate
+      - name: Terraform Validate
         run: terraform validate
 
-      - name: 📋 Terraform Plan
+      - name: Terraform Plan
         if: ${{ github.event.inputs.action == 'plan' }}
         run: terraform plan -input=false
 
-      - name: 🚀 Terraform Apply
+      - name: Terraform Apply
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve
 
-      - name: 💣 Terraform Destroy
+      - name: Terraform destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
