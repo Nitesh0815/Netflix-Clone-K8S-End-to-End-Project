@@ -1,22 +1,27 @@
-variable "aws_region" {}
+variable "aws-region" {}
 variable "env" {}
-variable "cidr_block" {}
-variable "pub_subnet_count" {}
-variable "pub_cidr_block" {
+variable "cidr-block" {}
+variable "pub-subnet-count" {}
+variable "pub-cidr-block" {
   type = list(string)
 }
-variable "pub_availability_zone" {
+variable "pub-availability-zone" {
   type = list(string)
 }
-variable "ec2_instance_count" {}
+variable "ec2-instance-count" {}
 variable "ec2_instance_type" {
   type = list(string)
 }
 variable "ec2_volume_size" {}
 variable "ec2_volume_type" {}
 
-# New variable required for Ansible connectivity via GitHub Actions secret
-variable "ssh_key_name" {
-  description = "The name of the AWS Key Pair to use for SSH access to EC2 instances. Value is typically passed via the TF_VAR_ssh_key_name environment variable from GitHub Actions."
+# NEW: Variable definition for the SSH Public Key
+variable "ssh_public_key" {
+  description = "The SSH public key material used for EC2 instance access."
+  type        = string
+}
+
+variable "project" {
+  description = "The name of the project for resource tagging and naming."
   type        = string
 }

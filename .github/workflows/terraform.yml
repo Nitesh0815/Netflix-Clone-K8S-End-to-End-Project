@@ -1,11 +1,11 @@
-name: '🔨 Terraform + Ansible Automation on AWS'
+name: '🔨 Infrastructure Configuring using Terraform on AWS' 
 
-on:
+on: 
   workflow_dispatch:
     inputs:
       action:
         type: choice
-        description: 'Select Terraform Action'
+        description: 'Terraform Action'
         options:
           - plan
           - apply
@@ -14,52 +14,50 @@ on:
         default: 'plan'
 
 env:
-  # Terraform Cloud backend credentials
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
   TF_WORKSPACE: ${{ secrets.TF_WORKSPACE }}
   TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
-
-  # AWS credentials
-  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-  # SSH Key name (for EC2 provisioning)
-  TF_VAR_ssh_key_name: ${{ secrets.AWS_KEY_PAIR_NAME }}
-
 permissions:
   contents: read
 
+
 jobs:
-  terraform:
-    name: Terraform ${{ github.event.inputs.action }}
-    runs-on: ubuntu-latest
+  infrastructure-setup-using-terraform:
+    name: Terraform ${{ github.event.input.actions }}
+    runs-on: ubuntu-24.04
+    environment: production
 
     defaults:
       run:
         shell: bash
-        working-directory: Terraform # 👈 Make sure your Terraform code is in this folder
+        working-directory: Terraform
 
     steps:
-      # ------------------------------------------------------------
-      # STEP 1: CHECKOUT CODE
-      # ------------------------------------------------------------
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v5
 
-      # ------------------------------------------------------------
-      # STEP 2: SETUP TERRAFORM
-      # ------------------------------------------------------------
-      - name: Setup Terraform
+      - name: Setting Up the Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.7.5"
-          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_version: "1.13.3"
+          terraform_wrapper: true
+          cli_config_credentials_token: ${{ secrets. TF_API_TOKEN }}
 
-      # ------------------------------------------------------------
-      # STEP 3: TERRAFORM COMMANDS
-      # ------------------------------------------------------------
-      - name: Terraform Init
-        run: terraform init -input=false
+      - name: Cache Terraform
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            .terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+          
+      - name: Initialising the Terraform
+        run: terraform init
+
+      - name: Terraform Format Check
+        run: terraform fmt -check --diff
 
       - name: Terraform Validate
         run: terraform validate
@@ -70,78 +68,8 @@ jobs:
 
       - name: Terraform Apply
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: terraform apply -auto-approve -input=false
+        run: terraform apply -auto-approve
 
-      - name: Terraform Destroy
+      - name: Terraform destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
-        run: terraform destroy -auto-approve -input=false
-
-      # ------------------------------------------------------------
-      # STEP 4: SETUP SSH AGENT (FOR ANSIBLE)
-      # ------------------------------------------------------------
-      - name: Setup SSH Agent
-        if: ${{ github.event.inputs.action == 'apply' }}
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
-
-      # ------------------------------------------------------------
-      # STEP 5: INSTALL ANSIBLE + DEPENDENCIES
-      # ------------------------------------------------------------
-      - name: Install Ansible & Dependencies
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "🟢 Installing Ansible, jq, Python3, pip..."
-          sudo apt update -y
-          sudo apt install -y ansible python3 jq python3-pip
-          pip3 install --user jinja2
-
-      # ------------------------------------------------------------
-      # STEP 6: COLLECT TERRAFORM OUTPUTS
-      # ------------------------------------------------------------
-      - name: Export Terraform Outputs to Ansible
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "📦 Exporting Terraform outputs to ansible/ec2_ips.json"
-          terraform output -json > ../ansible/ec2_ips.json
-
-      # ------------------------------------------------------------
-      # STEP 7: GENERATE DYNAMIC INVENTORY FOR ANSIBLE
-      # ------------------------------------------------------------
-      - name: Generate Dynamic Inventory
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "⚙️ Generating Ansible inventory from Terraform outputs..."
-          cd ../ansible
-          
-          echo "🔍 Checking scripts directory:"
-          ls -l scripts/
-
-          python3 scripts/generate_inventory.py ec2_ips.json inventory.ini
-
-          echo "✅ Generated inventory.ini:"
-          cat inventory.ini
-
-      # ------------------------------------------------------------
-      # STEP 8: WAIT FOR EC2 TO BECOME REACHABLE
-      # ------------------------------------------------------------
-      - name: Wait for EC2 SSH Availability
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "⏳ Waiting 60 seconds for instances to boot..."
-          sleep 60
-          
-          export ANSIBLE_HOST_KEY_CHECKING=False
-          cd ../ansible
-          echo "🚀 Checking SSH connection to all nodes..."
-          ansible all -i inventory.ini -u ubuntu -m wait_for_connection -a "delay=5 timeout=300"
-
-      # ------------------------------------------------------------
-      # STEP 9: RUN ANSIBLE PLAYBOOK
-      # ------------------------------------------------------------
-      - name: Run Ansible Playbook
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "✅ Running Ansible Playbook..."
-          cd ../ansible
-          ansible-playbook -i inventory.ini -u ubuntu site.yml
+        run: terraform destroy -auto-approve
