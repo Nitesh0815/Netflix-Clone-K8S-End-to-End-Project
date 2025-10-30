@@ -32,65 +32,65 @@ jobs:
         working-directory: Terraform
 
     steps:
-      - name: Checkout Repository
+      - name: 🧾 Checkout Repository
         uses: actions/checkout@v5
 
-      - name: Configure AWS Credentials
+      - name: 🔑 Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Setup Terraform
+      - name: ⚙️ Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-      - name: Terraform Init
+      - name: 🏗️ Terraform Init
         run: terraform init -input=false
 
-      - name: Terraform Format Check
+      - name: 🧹 Terraform Format Check
         run: terraform fmt -check --diff
 
-      - name: Terraform Validate
+      - name: ✅ Terraform Validate
         run: terraform validate
 
-      - name: Terraform Plan
+      - name: 📋 Terraform Plan
         if: ${{ github.event.inputs.action == 'plan' }}
         run: terraform plan -input=false
 
-      - name: Terraform Apply
+      - name: 🚀 Terraform Apply
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve
 
-      - name: Terraform Destroy
+      - name: 💣 Terraform Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
-      - name: Save Terraform Outputs
+      - name: 📤 Save Terraform Outputs
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform output -json > tf_outputs.json
 
-      # --- Build simplified Ansible inventory ---
-      - name: Generate Ansible Inventory
+      - name: 🧱 Generate Ansible Inventory
         if: ${{ github.event.inputs.action == 'apply' }}
         run: |
           cd ..
           python3 ansible/generate_inventory.py
           echo "✅ Generated ansible/inventory.yml"
 
-      - name: Install Ansible
+      - name: 🧰 Install Ansible & Dependencies
         if: ${{ github.event.inputs.action == 'apply' }}
         run: |
           sudo apt-get update -y
           sudo apt-get install -y python3 python3-pip
+          pip3 install --upgrade pip
           pip3 install ansible boto3 botocore
           ansible-galaxy collection install amazon.aws
+          ansible --version
 
-      # --- Run simplified playbook ---
-      - name: Run Ansible Playbook
+      - name: 🪄 Run Ansible Playbook
         if: ${{ github.event.inputs.action == 'apply' }}
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
