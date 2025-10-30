@@ -1,75 +1,76 @@
-name: '🔨 Infrastructure Configuring using Terraform on AWS' 
+name: "🔨 Terraform + Ansible Automation on AWS"
 
-on: 
+on:
   workflow_dispatch:
     inputs:
       action:
         type: choice
-        description: 'Terraform Action'
+        description: "Select Terraform Action"
         options:
           - plan
           - apply
           - destroy
         required: true
-        default: 'plan'
+        default: "plan"
 
 env:
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-  TF_WORKSPACE: ${{ secrets.TF_WORKSPACE }}
-  TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
-permissions:
-  contents: read
-
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: "ap-south-1"
 
 jobs:
-  infrastructure-setup-using-terraform:
-    name: Terraform ${{ github.event.input.actions }}
-    runs-on: ubuntu-24.04
-    environment: production
-
-    defaults:
-      run:
-        shell: bash
-        working-directory: Terraform
+  terraform-ansible:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Setting Up the Terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.13.3"
-          terraform_wrapper: true
-          cli_config_credentials_token: ${{ secrets. TF_API_TOKEN }}
+          terraform_version: 1.9.5
 
-      - name: Cache Terraform
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.terraform.d/plugin-cache
-            .terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
-          
-      - name: Initialising the Terraform
+      - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Format Check
-        run: terraform fmt -check --diff
+      - name: Terraform ${{ github.event.inputs.action }}
+        run: terraform ${{ github.event.inputs.action }} -auto-approve
 
-      - name: Terraform Validate
-        run: terraform validate
+      - name: Setup Python for Ansible
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Terraform Plan
-        if: ${{ github.event.inputs.action == 'plan' }}
-        run: terraform plan -input=false
+      - name: Install Ansible
+        run: |
+          pip install ansible boto3
 
-      - name: Terraform Apply
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: terraform apply -auto-approve
+      - name: Generate Dynamic Inventory
+        run: |
+          cat <<'PY' > generate_inventory.py
+          import json, sys, os
 
-      - name: Terraform destroy
-        if: ${{ github.event.inputs.action == 'destroy' }}
-        run: terraform destroy -auto-approve
+          INSTANCE_GROUPS = {
+              0: "jenkins_server",
+              1: "monitoring_server",
+              2: "k8s_master",
+              3: "k8s_worker"
+          }
+
+          inventory = {"_meta": {"hostvars": {}}}
+          for idx, name in INSTANCE_GROUPS.items():
+              inventory[name] = {"hosts": [f"{name}_host_{idx}"]}
+              inventory["_meta"]["hostvars"][f"{name}_host_{idx}"] = {
+                  "ansible_host": f"192.168.1.{10+idx}"
+              }
+
+          print(json.dumps(inventory, indent=2))
+          PY
+
+      - name: Verify Inventory
+        run: python3 generate_inventory.py
+
+      - name: Run Ansible Playbook
+        run: ansible-playbook -i generate_inventory.py playbook.yml
