@@ -51,13 +51,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ✅ Step 3: Install Python, Ansible, and AWS collections
+# ✅ Step 3: Install Python, Ansible, and AWS collections
       - name: "🐍 Set Up Python & Install Dependencies"
         run: |
-          sudo apt update -y
-          sudo apt install -y python3-pip
+          # 1. Install Ansible and dependencies
           pip3 install ansible boto3 botocore
+
+          # 2. Install AWS collections explicitly to the user's home directory path
+          # We use `~/.ansible/collections` which is one of the default paths.
           ansible-galaxy collection install amazon.aws community.aws
+        
+      # 🆕 New Step: Set Environment Variable for Ansible (This may not be strictly necessary 
+      # but guarantees the path is set correctly for subsequent steps)
+      - name: "⚙️ Configure Ansible Collection Path"
+        run: echo "ANSIBLE_COLLECTIONS_PATHS=$HOME/.ansible/collections" >> $GITHUB_ENV
+
+      # The inventory and playbook steps will now use the correct path.
 
       # ✅ Step 4: Create dynamic inventory file for AWS SSM
       - name: "📜 Generate Dynamic Inventory (SSM)"
