@@ -1,0 +1,71 @@
+---
+- name: Install and configure Prometheus
+  hosts: tag_Name_monitoring-server
+  become: yes
+  vars:
+    prometheus_version: "2.53.0"
+  tasks:
+    - name: Create Prometheus user and directories
+      user:
+        name: prometheus
+        shell: /bin/false
+
+    - name: Create required directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: prometheus
+        group: prometheus
+      loop:
+        - /etc/prometheus
+        - /var/lib/prometheus
+
+    - name: Download Prometheus tarball
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: /tmp/prometheus.tar.gz
+
+    - name: Extract Prometheus files
+      unarchive:
+        src: /tmp/prometheus.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Move binaries to /usr/local/bin
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        mode: '0755'
+      loop:
+        - prometheus
+        - promtool
+
+    - name: Copy configuration
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/prometheus.yml"
+        dest: /etc/prometheus/prometheus.yml
+        owner: prometheus
+        group: prometheus
+
+    - name: Create Prometheus systemd service
+      copy:
+        dest: /etc/systemd/system/prometheus.service
+        content: |
+          [Unit]
+          Description=Prometheus Monitoring
+          After=network-online.target
+
+          [Service]
+          User=prometheus
+          ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload and start Prometheus
+      systemd:
+        daemon_reload: yes
+        name: prometheus
+        enabled: yes
+        state: started

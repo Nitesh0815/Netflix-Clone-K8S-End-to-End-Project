@@ -1,0 +1,57 @@
+name: "🚀 Automated Ansible Deployment After Terraform Apply"
+
+on:
+  # 👇 This triggers automatically after Terraform workflow finishes successfully
+  workflow_run:
+    workflows: ["🔨 Infrastructure Configuring using Terraform on AWS"]
+    types:
+      - completed
+
+  # 👇 Optional: allow manual trigger for any component
+  workflow_dispatch:
+    inputs:
+      component:
+        description: "Select which component to deploy"
+        required: true
+        type: choice
+        options:
+          - jenkins
+          - grafana
+          - prometheus
+          - k8s-master
+          - k8s-worker
+        default: "jenkins"
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  ansible-deploy:
+    name: "🧩 Run Ansible Playbook After Terraform"
+    runs-on: ubuntu-latest
+
+    # 👇 Only run if Terraform workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      # Step 1: Checkout repository
+      - name: "📦 Checkout Repository"
+        uses: actions/checkout@v4
+
+      # Step 2: Configure AWS credentials
+      - name: "🔐 Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Step 3: Install Python, Ansible, and AWS + SSM dependencies
+      - name: "🐍 Set Up Python & Install Dependencies"
+        run: |
+          sudo apt update -y
+          sudo apt install -y python3-pip
