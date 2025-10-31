@@ -14,6 +14,7 @@ resource "aws_instance" "ec2" {
   instance_type          = var.ec2_instance_type[count.index]
   iam_instance_profile   = aws_iam_instance_profile.iam-instance-profile.name
   vpc_security_group_ids = [aws_security_group.default-ec2-sg.id]
+
   root_block_device {
     volume_size = var.ec2_volume_size
     volume_type = var.ec2_volume_type
@@ -23,4 +24,7 @@ resource "aws_instance" "ec2" {
     Name = "${local.org}-${local.project}-${local.env}-${local.instance_names[count.index]}"
     Env  = "${local.env}"
   }
+
+  # ✅ This ensures Terraform creates IAM role/profile before EC2
+  depends_on = [aws_iam_instance_profile.iam-instance-profile]
 }
