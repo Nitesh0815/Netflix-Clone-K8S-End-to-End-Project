@@ -1,17 +1,20 @@
 ---
 - name: Install and configure Prometheus
-  hosts: tag_Name_monitoring-server
+  # 🌟 FIX 1: Use the wildcard pattern to match the dynamic group name: 
+  # Example: tag_Name_Nitesh_netflix_clone_dev_monitoring_server
+  hosts: tag_Name_*monitoring_server 
   become: yes
   vars:
     prometheus_version: "2.53.0"
+    prometheus_dir: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64" # Define the extracted directory
   tasks:
     - name: Create Prometheus user and directories
-      user:
+      ansible.builtin.user:
         name: prometheus
         shell: /bin/false
 
     - name: Create required directories
-      file:
+      ansible.builtin.file:
         path: "{{ item }}"
         state: directory
         owner: prometheus
@@ -21,34 +24,42 @@
         - /var/lib/prometheus
 
     - name: Download Prometheus tarball
-      get_url:
+      ansible.builtin.get_url:
         url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
         dest: /tmp/prometheus.tar.gz
+        # Ensure the file owner is correct after download
+        mode: '0644' 
 
     - name: Extract Prometheus files
-      unarchive:
+      ansible.builtin.unarchive:
         src: /tmp/prometheus.tar.gz
         dest: /tmp/
-        remote_src: yes
+        remote_src: yes # The source file is on the remote node
 
     - name: Move binaries to /usr/local/bin
-      copy:
-        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+      # 🌟 FIX 2: Use ansible.builtin.copy with remote_src: yes
+      ansible.builtin.copy:
+        src: "{{ prometheus_dir }}/{{ item }}"
         dest: "/usr/local/bin/{{ item }}"
+        owner: root
+        group: root
         mode: '0755'
+        remote_src: yes # Source is on the target machine
       loop:
         - prometheus
         - promtool
 
     - name: Copy configuration
-      copy:
-        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/prometheus.yml"
+      # 🌟 FIX 3: Use ansible.builtin.copy with remote_src: yes
+      ansible.builtin.copy:
+        src: "{{ prometheus_dir }}/prometheus.yml"
         dest: /etc/prometheus/prometheus.yml
         owner: prometheus
         group: prometheus
+        remote_src: yes # Source is on the target machine
 
     - name: Create Prometheus systemd service
-      copy:
+      ansible.builtin.copy:
         dest: /etc/systemd/system/prometheus.service
         content: |
           [Unit]
@@ -57,15 +68,26 @@
 
           [Service]
           User=prometheus
+          # Use the full binary path
           ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus
+          Type=simple # Good practice to define Type
           Restart=always
+          RestartSec=5s # Wait 5 seconds before restarting
 
           [Install]
           WantedBy=multi-user.target
 
     - name: Reload and start Prometheus
-      systemd:
+      ansible.builtin.systemd:
         daemon_reload: yes
         name: prometheus
         enabled: yes
         state: started
+
+    - name: Clean up downloaded files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/prometheus.tar.gz
+        - "{{ prometheus_dir }}"

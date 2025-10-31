@@ -1,38 +1,42 @@
 ---
 - name: Install and configure Grafana
-  hosts: tag_Name_monitoring-server
+  # 🌟 FIX: Use the wildcard pattern to match the dynamic group name: 
+  # Example: tag_Name_Nitesh_netflix_clone_dev_monitoring_server
+  hosts: tag_Name_*monitoring_server
   become: yes
   tasks:
     - name: Update packages
-      apt:
+      ansible.builtin.apt:
         update_cache: yes
 
     - name: Install dependencies
-      apt:
+      ansible.builtin.apt:
         name:
           - apt-transport-https
           - software-properties-common
           - wget
+          - gnupg # Added gnupg, often required for key management
         state: present
 
     - name: Add Grafana GPG key
-      apt_key:
+      # Note: apt_key is fine for simple scripts, but GPG fetching is generally safer/modern.
+      ansible.builtin.apt_key:
         url: https://packages.grafana.com/gpg.key
         state: present
 
     - name: Add Grafana repository
-      apt_repository:
+      ansible.builtin.apt_repository:
         repo: "deb https://packages.grafana.com/oss/deb stable main"
         state: present
 
     - name: Install Grafana
-      apt:
+      ansible.builtin.apt:
         name: grafana
         state: present
         update_cache: yes
 
     - name: Enable and start Grafana
-      systemd:
+      ansible.builtin.systemd:
         name: grafana-server
         enabled: yes
         state: started

@@ -1,45 +1,54 @@
 ---
 - name: Install and configure Jenkins
-  hosts: tag_Name_jenkins-server
+  # Targets any instance group name that contains 'jenkins_server'
+  # Example: tag_Name_Nitesh_netflix_clone_dev_jenkins_server
+  hosts: tag_Name_*jenkins_server 
   become: yes
   vars:
     java_package: openjdk-17-jdk
   tasks:
     - name: Update system packages
-      apt:
+      ansible.builtin.apt:
         update_cache: yes
 
     - name: Install Java (required for Jenkins)
-      apt:
+      ansible.builtin.apt:
         name: "{{ java_package }}"
         state: present
 
+    # Best Practice: Using apt_key is fine for simple scripts, 
+    # but be aware of its security limitations.
     - name: Add Jenkins repository key
-      apt_key:
+      ansible.builtin.apt_key:
         url: https://pkg.jenkins.io/debian/jenkins.io.key
         state: present
 
     - name: Add Jenkins repository
-      apt_repository:
+      ansible.builtin.apt_repository:
         repo: "deb https://pkg.jenkins.io/debian binary/"
         state: present
 
     - name: Install Jenkins
-      apt:
+      ansible.builtin.apt:
         name: jenkins
         state: present
         update_cache: yes
 
     - name: Enable and start Jenkins service
-      systemd:
+      ansible.builtin.systemd:
         name: jenkins
         enabled: yes
         state: started
 
     - name: Print Jenkins initial admin password
-      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      ansible.builtin.command: cat /var/lib/jenkins/secrets/initialAdminPassword
       register: jenkins_password
       changed_when: false
+      # ⚠️ SECURITY: Prevent this sensitive value from appearing in CI/CD logs
+      no_log: true 
 
-    - debug:
+    - name: Display Jenkins Admin Password
+      ansible.builtin.debug:
         msg: "Jenkins Admin Password: {{ jenkins_password.stdout }}"
+      # ⚠️ SECURITY: Prevent this sensitive value from appearing in CI/CD logs
+      no_log: true

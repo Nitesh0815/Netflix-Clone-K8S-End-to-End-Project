@@ -1,39 +1,112 @@
 ---
 - name: Setup Kubernetes Worker Node
-  hosts: tag_Name_kubernetes-worker-node
+  # 🌟 FIX: Use the wildcard pattern to match the dynamic group name: 
+  # Example: tag_Name_Nitesh_netflix_clone_dev_kubernetes_worker_node
+  hosts: tag_Name_*kubernetes_worker_node
   become: yes
   vars:
-    join_command_file: "/tmp/kube_join_command.sh"
+    master_group: tag_Name_*kubernetes_master_node
   tasks:
-    - name: Install dependencies
-      apt:
+    - name: Update packages and install initial dependencies
+      ansible.builtin.apt:
         name:
           - apt-transport-https
           - ca-certificates
           - curl
+          - gnupg
+          - software-properties-common
         state: present
         update_cache: yes
+        
+    # --- K8S Prerequisites (Required for all nodes) ---
 
+    - name: Disable swap permanently
+      ansible.builtin.shell: |
+        swapoff -a
+        sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+      # Skip this step if swap is already disabled
+      when: ansible_swaptotal_mb > 0 
+      
+    - name: Add required kernel modules and set sysctl parameters
+      ansible.builtin.blockinfile:
+        path: /etc/sysctl.d/99-kubernetes.conf
+        create: true
+        block: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+        mode: '0644'
+        
+    - name: Load kernel modules
+      ansible.builtin.command: sysctl --system
+
+    # --- Container Runtime (Containerd) ---
+
+    - name: Install Containerd dependencies
+      ansible.builtin.apt:
+        name: 
+          - containerd
+        state: present
+
+    - name: Configure Containerd to use systemd cgroup driver
+      ansible.builtin.shell: |
+        containerd config default > /etc/containerd/config.toml
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+      notify: Restart containerd
+
+    # --- Kubernetes Installation ---
+    
     - name: Add Kubernetes GPG key
-      shell: |
+      ansible.builtin.shell: |
         curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       args:
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     - name: Add Kubernetes repository
-      apt_repository:
+      ansible.builtin.apt_repository:
         repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
         state: present
 
-    - name: Install kubeadm, kubelet, kubectl
-      apt:
+    - name: Install kubeadm, kubelet, kubectl (and hold their version)
+      ansible.builtin.apt:
         name:
           - kubelet
           - kubeadm
           - kubectl
         state: present
         update_cache: yes
+        
+    - name: Hold Kubernetes package versions
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
 
-    - name: Copy join command from master node (using SSM or manual step)
-      debug:
-        msg: "Run the join command provided by the master node manually or via SSM."
+    # --- Cluster Join Process ---
+
+    - name: 🚀 Fetch the kubeadm join command from the Master Node
+      # The master_group variable targets the master node
+      ansible.builtin.command: kubeadm token create --print-join-command
+      delegate_to: "{{ groups[master_group][0] }}"
+      run_once: true
+      register: kubeadm_join_command
+      
+    - name: Ensure kubelet is running before join
+      ansible.builtin.systemd:
+        name: kubelet
+        state: started
+        enabled: yes
+
+    - name: 🔗 Execute the join command
+      ansible.builtin.shell: "{{ kubeadm_join_command.stdout }}"
+      args:
+        # Prevent running join command if the node is already part of the cluster
+        creates: /etc/kubernetes/kubelet.conf
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.service:
+        name: containerd
+        state: restarted

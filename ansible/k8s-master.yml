@@ -1,30 +1,71 @@
 ---
 - name: Setup Kubernetes Master Node
-  hosts: tag_Name_kubernetes-master-node
+  # 🌟 FIX: Use the wildcard pattern to match the dynamic group name: 
+  # Example: tag_Name_Nitesh_netflix_clone_dev_kubernetes_master_node
+  hosts: tag_Name_*kubernetes_master_node
   become: yes
   tasks:
-    - name: Install dependencies
-      apt:
+    - name: Update packages and install initial dependencies
+      ansible.builtin.apt:
         name:
           - apt-transport-https
           - ca-certificates
           - curl
+          - gnupg
+          - software-properties-common
         state: present
         update_cache: yes
+        
+    # --- K8S Prerequisites ---
 
+    - name: Disable swap permanently
+      ansible.builtin.shell: |
+        swapoff -a
+        sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+      # Skip this step if swap is already disabled
+      when: ansible_swaptotal_mb > 0 
+      
+    - name: Add required kernel modules and set sysctl parameters
+      ansible.builtin.blockinfile:
+        path: /etc/sysctl.d/99-kubernetes.conf
+        create: true
+        block: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+        mode: '0644'
+        
+    - name: Load kernel modules
+      ansible.builtin.command: sysctl --system
+
+    # --- Container Runtime (Containerd) ---
+
+    - name: Install Containerd dependencies
+      ansible.builtin.apt:
+        name: 
+          - containerd
+        state: present
+
+    - name: Configure Containerd to use systemd cgroup driver
+      ansible.builtin.shell: |
+        containerd config default > /etc/containerd/config.toml
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+      notify: Restart containerd
+
+    # --- Kubernetes Installation ---
+    
     - name: Add Kubernetes GPG key
-      shell: |
+      ansible.builtin.shell: |
         curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       args:
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     - name: Add Kubernetes repository
-      apt_repository:
+      ansible.builtin.apt_repository:
         repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
         state: present
 
-    - name: Install kubeadm, kubelet, kubectl
-      apt:
+    - name: Install kubeadm, kubelet, kubectl (and hold their version)
+      ansible.builtin.apt:
         name:
           - kubelet
           - kubeadm
@@ -32,19 +73,51 @@
         state: present
         update_cache: yes
 
+    - name: Hold Kubernetes package versions
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
     - name: Initialize Kubernetes cluster
-      shell: |
+      ansible.builtin.shell: |
+        # Use the address of the EC2 instance as the control plane endpoint
+        # This assumes the control plane IP is known or using the default advertised IP
         kubeadm init --pod-network-cidr=10.244.0.0/16
       args:
         creates: /etc/kubernetes/admin.conf
+      register: kubeadm_init_result
 
+    - name: Get kubeadm join command and token
+      ansible.builtin.shell: kubeadm token create --print-join-command
+      register: kubeadm_join_command
+      # This command is needed for the worker node playbook
+      
+    # --- Post-Install Configuration ---
+    
     - name: Setup kubeconfig for ubuntu user
-      become_user: ubuntu
-      shell: |
+      ansible.builtin.become_user: ubuntu
+      ansible.builtin.shell: |
         mkdir -p $HOME/.kube
         sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
         sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
     - name: Install Flannel CNI
-      become_user: ubuntu
-      shell: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+      ansible.builtin.become_user: ubuntu
+      ansible.builtin.shell: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+      args:
+        # Check if the Flannel manifest is already applied
+        creates: /opt/cni/bin/flannel
+      
+    - name: Debug: Display join command (needed for worker nodes)
+      ansible.builtin.debug:
+        msg: "Worker Node Join Command: {{ kubeadm_join_command.stdout }}"
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.service:
+        name: containerd
+        state: restarted
