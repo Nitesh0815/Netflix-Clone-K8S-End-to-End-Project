@@ -20,11 +20,20 @@ resource "aws_instance" "ec2" {
     volume_type = var.ec2_volume_type
   }
 
+  # ✅ Install and start SSM Agent automatically
+  user_data = <<-EOF
+              #!/bin/bash
+              apt update -y
+              apt install -y snapd
+              snap install amazon-ssm-agent --classic
+              systemctl enable amazon-ssm-agent
+              systemctl start amazon-ssm-agent
+              EOF
+
   tags = {
     Name = "${local.org}-${local.project}-${local.env}-${local.instance_names[count.index]}"
     Env  = "${local.env}"
   }
 
-  # ✅ This ensures Terraform creates IAM role/profile before EC2
   depends_on = [aws_iam_instance_profile.iam-instance-profile]
 }

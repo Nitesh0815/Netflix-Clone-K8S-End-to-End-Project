@@ -1,13 +1,11 @@
 name: "🚀 Automated Ansible Deployment After Terraform Apply"
 
 on:
-  # 👇 This triggers automatically after Terraform workflow finishes successfully
   workflow_run:
     workflows: ["🔨 Infrastructure Configuring using Terraform on AWS"]
     types:
       - completed
 
-  # 👇 Optional: allow manual trigger for any component
   workflow_dispatch:
     inputs:
       component:
@@ -29,8 +27,6 @@ jobs:
   ansible-deploy:
     name: "🧩 Run Ansible Playbook After Terraform"
     runs-on: ubuntu-latest
-
-    # 👇 Only run if Terraform workflow succeeded
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     permissions:
@@ -38,11 +34,9 @@ jobs:
       contents: read
 
     steps:
-      # Step 1: Checkout repository
       - name: "📦 Checkout Repository"
         uses: actions/checkout@v4
 
-      # Step 2: Configure AWS credentials
       - name: "🔐 Configure AWS Credentials"
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -50,8 +44,38 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Step 3: Install Python, Ansible, and AWS + SSM dependencies
       - name: "🐍 Set Up Python & Install Dependencies"
         run: |
           sudo apt update -y
           sudo apt install -y python3-pip
+          pip3 install ansible boto3 botocore amazon-ssm-agent
+          ansible-galaxy collection install amazon.aws community.aws
+
+      - name: "📜 Generate Dynamic Inventory (SSM)"
+        run: |
+          cat <<'EOF' > inventory_aws_ssm.yml
+          plugin: amazon.aws.aws_ssm
+          regions:
+            - ${AWS_REGION}
+          filters: {}
+          hostnames:
+            - tag:Name
+          compose:
+            ansible_user: "ubuntu"
+          EOF
+
+      - name: "🔍 Debug Inventory"
+        run: ansible-inventory -i inventory_aws_ssm.yml --list --yaml
+
+      - name: "⚙️ Run Ansible Playbook for Selected Component"
+        run: |
+          COMPONENT=${{ github.event.inputs.component }}
+          if [ -z "$COMPONENT" ]; then
+            COMPONENT="jenkins"
+          fi
+          echo "Running Ansible playbook for: $COMPONENT"
+          ansible-playbook -i inventory_aws_ssm.yml ansible/${COMPONENT}.yml
+        shell: bash
+
+      - name: "✅ Verify Ansible Installation"
+        run: ansible --version
