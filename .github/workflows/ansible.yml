@@ -57,11 +57,8 @@ jobs:
           # 1. Install Ansible and dependencies
           pip3 install ansible boto3 botocore
 
-          # 2. Install AWS collections explicitly to the user's home directory path
-          # We use `~/.ansible/collections` which is one of the default paths.
-          ansible-galaxy collection install amazon.aws community.aws
-        
-      # 🆕 New Step: Set Environment Variable for Ansible (This may not be strictly necessary 
+          # 2. Force install AWS collections to ensure the inventory plugin is available
+          ansible-galaxy collection install amazon.aws community.aws --force
       # but guarantees the path is set correctly for subsequent steps)
       - name: "⚙️ Configure Ansible Collection Path"
         run: echo "ANSIBLE_COLLECTIONS_PATHS=$HOME/.ansible/collections" >> $GITHUB_ENV
