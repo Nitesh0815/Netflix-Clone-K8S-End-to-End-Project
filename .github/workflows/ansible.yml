@@ -29,7 +29,10 @@ jobs:
   ansible-deploy:
     name: "🧩 Run Ansible Playbook After Terraform"
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # ✅ FIX 1: Add null check for manual trigger
+    if: |
+      (github.event_name == 'workflow_dispatch') || 
+      (github.event.workflow_run.conclusion == 'success')
 
     permissions:
       id-token: write
@@ -63,11 +66,13 @@ jobs:
           plugin: amazon.aws.aws_ssm
           regions:
             - ap-south-1
-          filters: {}
+          filters:
+            # Optional: only include instances tagged with Project=Netflix
+            tag:Project: Netflix
           hostnames:
             - tag:Name
           compose:
-            ansible_user: "ubuntu"
+            ansible_user: ubuntu
           EOF
 
       # ✅ Step 5: Validate inventory (debug)
@@ -77,12 +82,12 @@ jobs:
       # ✅ Step 6: Run playbook for the selected component
       - name: "⚙️ Run Ansible Playbook for Selected Component"
         run: |
-          COMPONENT=${{ github.event.inputs.component }}
+          COMPONENT="${{ github.event.inputs.component }}"
           if [ -z "$COMPONENT" ]; then
             COMPONENT="jenkins"
           fi
-          echo "Running Ansible playbook for: $COMPONENT"
-          ansible-playbook -i inventory_aws_ssm.yml ansible/${COMPONENT}.yml
+          echo "🛠 Running Ansible playbook for: $COMPONENT"
+          ansible-playbook -i inventory_aws_ssm.yml "ansible/${COMPONENT}.yml" -v
         shell: bash
 
       # ✅ Step 7: Verify Ansible installation
