@@ -1,11 +1,13 @@
 name: "🚀 Automated Ansible Deployment After Terraform Apply"
 
 on:
+  # 👇 Automatically trigger after Terraform workflow completes successfully
   workflow_run:
     workflows: ["🔨 Infrastructure Configuring using Terraform on AWS"]
     types:
       - completed
 
+  # 👇 Manual trigger (optional)
   workflow_dispatch:
     inputs:
       component:
@@ -34,9 +36,11 @@ jobs:
       contents: read
 
     steps:
+      # ✅ Step 1: Checkout repo
       - name: "📦 Checkout Repository"
         uses: actions/checkout@v4
 
+      # ✅ Step 2: Configure AWS credentials
       - name: "🔐 Configure AWS Credentials"
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -44,19 +48,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ✅ Step 3: Install Python, Ansible, and AWS collections
       - name: "🐍 Set Up Python & Install Dependencies"
         run: |
           sudo apt update -y
           sudo apt install -y python3-pip
-          pip3 install ansible boto3 botocore amazon-ssm-agent
+          pip3 install ansible boto3 botocore
           ansible-galaxy collection install amazon.aws community.aws
 
+      # ✅ Step 4: Create dynamic inventory file for AWS SSM
       - name: "📜 Generate Dynamic Inventory (SSM)"
         run: |
           cat <<'EOF' > inventory_aws_ssm.yml
           plugin: amazon.aws.aws_ssm
           regions:
-            - ${AWS_REGION}
+            - ap-south-1
           filters: {}
           hostnames:
             - tag:Name
@@ -64,9 +70,11 @@ jobs:
             ansible_user: "ubuntu"
           EOF
 
+      # ✅ Step 5: Validate inventory (debug)
       - name: "🔍 Debug Inventory"
         run: ansible-inventory -i inventory_aws_ssm.yml --list --yaml
 
+      # ✅ Step 6: Run playbook for the selected component
       - name: "⚙️ Run Ansible Playbook for Selected Component"
         run: |
           COMPONENT=${{ github.event.inputs.component }}
@@ -77,5 +85,6 @@ jobs:
           ansible-playbook -i inventory_aws_ssm.yml ansible/${COMPONENT}.yml
         shell: bash
 
+      # ✅ Step 7: Verify Ansible installation
       - name: "✅ Verify Ansible Installation"
         run: ansible --version
